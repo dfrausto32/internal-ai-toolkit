@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Generated benchmark output (never commit generated code)
+benchmarks/*/generated/
+
+# Pytest
+.pytest_cache/
+*.pytest_cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+agent_token_stats.json
