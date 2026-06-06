@@ -1,3 +1,10 @@
+---
+language: python
+frameworks: [fastapi, sqlalchemy, pydantic]
+estimated_lines: 90
+test_command: pytest benchmarks/app_01_rest_api/tests/ -v
+---
+
 # Spec: app_01_rest_api
 
 A FastAPI REST API for managing tasks, backed by SQLite via SQLAlchemy.
