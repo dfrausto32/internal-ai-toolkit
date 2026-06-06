@@ -1,4 +1,5 @@
 """Core generate loop: Ollama or Claude → test → Claude review → optional retry."""
+import importlib.metadata
 import subprocess
 import sys
 import time
@@ -23,6 +24,25 @@ def _run_tests(test_dir: str) -> tuple[bool, str]:
     )
     output = result.stdout + result.stderr
     return result.returncode == 0, output
+
+
+def _installed_versions(frameworks: list[str]) -> str:
+    """Look up actually-installed versions of the spec's declared frameworks.
+
+    Claude's review only sees generated code and test output — it has no way to know
+    what's actually installed, so it pattern-matches an import statement against its
+    training data and can confidently state the wrong version (e.g. claiming SQLAlchemy
+    2.0's DeclarativeBase "isn't available in the installed 1.x version" when 2.0.21 is
+    what's actually on disk). Grounding the review in real version strings turns a guess
+    into a fact it can check the generated code against.
+    """
+    found = []
+    for fw in frameworks:
+        try:
+            found.append(f"{fw}=={importlib.metadata.version(fw)}")
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return ", ".join(found) if found else "(no third-party frameworks declared in the spec)"
 
 
 def _condense_for_review(test_output: str) -> str:
@@ -104,7 +124,8 @@ async def _generate_ollama(
         print("[3/3] Claude review...", file=sys.stderr)
     spec_for_review = Path(output_path).parent.parent / "SPEC.md"
     full_spec = spec_for_review.read_text() if spec_for_review.exists() else spec_body
-    review = claude_review(full_spec, code, _condense_for_review(test_out))
+    versions = _installed_versions(frameworks)
+    review = claude_review(full_spec, code, _condense_for_review(test_out), versions)
     usage = review.pop("_usage")
     if verbose:
         print(f"      passed={review['passed']}  issues={len(review['issues'])}  tokens={usage['input_tokens']}in/{usage['output_tokens']}out", file=sys.stderr)
@@ -138,7 +159,7 @@ async def _generate_ollama(
         if verbose:
             print(f"        {pass_count2} passed  {fail_count2} failed", file=sys.stderr)
 
-        review2 = claude_review(full_spec, code2, _condense_for_review(test_out2))
+        review2 = claude_review(full_spec, code2, _condense_for_review(test_out2), versions)
         usage2 = review2.pop("_usage")
         if verbose:
             print(f"        passed={review2['passed']}  tokens={usage2['input_tokens']}in/{usage2['output_tokens']}out", file=sys.stderr)

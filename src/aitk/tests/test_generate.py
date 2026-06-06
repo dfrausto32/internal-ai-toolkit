@@ -1,5 +1,34 @@
 """Tests for aitk.generate — pure helpers (no Ollama/Claude calls)."""
-from aitk.generate import _condense_for_review
+import importlib.metadata
+from unittest.mock import patch
+
+from aitk.generate import _condense_for_review, _installed_versions
+
+
+def _fake_version(versions):
+    """Build a stand-in for importlib.metadata.version backed by a fixed version map."""
+    def lookup(name):
+        try:
+            return versions[name]
+        except KeyError:
+            raise importlib.metadata.PackageNotFoundError(name)
+    return lookup
+
+
+def test_installed_versions_formats_known_frameworks_as_pinned_requirements():
+    with patch("aitk.generate.importlib.metadata.version", _fake_version({"sqlalchemy": "2.0.21", "pydantic": "2.13.4"})):
+        assert _installed_versions(["sqlalchemy", "pydantic"]) == "sqlalchemy==2.0.21, pydantic==2.13.4"
+
+
+def test_installed_versions_skips_frameworks_with_no_installed_package():
+    with patch("aitk.generate.importlib.metadata.version", _fake_version({"sqlalchemy": "2.0.21"})):
+        assert _installed_versions(["sqlalchemy", "django"]) == "sqlalchemy==2.0.21"
+
+
+def test_installed_versions_falls_back_to_placeholder_when_nothing_resolves():
+    with patch("aitk.generate.importlib.metadata.version", _fake_version({})):
+        assert _installed_versions([]) == "(no third-party frameworks declared in the spec)"
+        assert _installed_versions(["stdlib"]) == "(no third-party frameworks declared in the spec)"
 
 
 def test_condense_drops_passed_lines_but_keeps_summary():
