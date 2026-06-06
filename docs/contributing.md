@@ -7,14 +7,12 @@ Guidelines for working in this repo — branching, commit style, how to add agen
 ## Branching
 
 ```
-main          ← stable, working state only
-├── phase/1-subagents       ← Phase 1 work
-├── phase/2-benchmarks      ← benchmark apps and specs
-├── phase/3-sdk             ← SDK migration
+master        ← stable, working state only
+├── phase/N-<short-name>    ← phase work (see docs/roadmap.md)
 └── fix/<short-description> ← bug fixes against any phase
 ```
 
-Merge to `main` only when the phase's definition of done is met (see `docs/roadmap.md`).
+Merge to `master` only when the phase's definition of done is met (see `docs/roadmap.md`).
 
 ---
 
@@ -26,7 +24,7 @@ Keep them short and scoped. Format: `<area>: <what changed>`
 agents: add ollama-coder.md initial draft
 scripts: add ollama_stream.py with token stats
 benchmarks: add app_01 spec and hand-written test suite
-orchestrator: add parallel worker functions in agents.py
+aitk: add retry-on-blocking-error to generate.py
 docs: update roadmap Phase 1 task status
 ```
 
@@ -65,6 +63,37 @@ cp .claude/agents/ollama-coder.md ~/.claude/agents/ollama-coder.md
 
 ---
 
+## Working on the `aitk` package
+
+The installable CLI lives in `src/aitk/` (`pyproject.toml` at the repo root, `hatchling` build backend). Install it in editable mode so changes take effect immediately:
+
+```bash
+pip install -e .
+aitk --help
+```
+
+Package layout:
+
+| Module | Responsibility |
+|--------|---------------|
+| `cli.py` | `argparse` entry point — `generate`, `cost`, `route` subcommands |
+| `spec.py` | Parses `SPEC.md` YAML frontmatter |
+| `routing.py` | Ollama-vs-Claude break-even decision (`BREAK_EVEN_TOKENS`) |
+| `agents.py` | Async Ollama worker, dynamic system-prompt construction |
+| `review.py` | Claude review step (structured JSON) |
+| `generate.py` | Full generate → test → review → retry orchestration loop |
+| `cost.py` | Run cost log (`~/.local/share/aitk/run_log.json`) |
+
+Run its test suite from the repo root:
+
+```bash
+pytest src/aitk/tests/ -v
+```
+
+When changing routing math or prompt rules, re-run the affected benchmark app (see below) to confirm quality didn't regress — `aitk`'s own tests cover its internals, not generation quality.
+
+---
+
 ## Running a Benchmark
 
 Each benchmark app has a spec (`SPEC.md`) and a hand-written test suite (`tests/`). The test suite is ground truth — never generate it with Ollama or Claude.
@@ -81,10 +110,12 @@ claude
 
 Record results in `benchmarks/README.md` under the Phase 1 column.
 
-### Phase 3 run (SDK)
+### Phase 3 run (aitk)
 ```bash
-cd orchestrator
-python main.py --spec ../benchmarks/app_01_rest_api/SPEC.md --output ../benchmarks/app_01_rest_api/generated/
+aitk generate \
+  --spec  benchmarks/app_01_rest_api/SPEC.md \
+  --out   benchmarks/app_01_rest_api/generated/api.py \
+  --tests benchmarks/app_01_rest_api/tests/
 ```
 
 Record results in `benchmarks/README.md` under the Phase 3 column.
@@ -95,12 +126,11 @@ For each run, fill in the benchmark results table:
 
 | Field | Where to find it |
 |-------|-----------------|
-| Claude tokens (input) | Logged to stdout by orchestrator, or Claude Code session summary |
-| Claude tokens (output) | Same |
+| Claude tokens (input/output) | `aitk generate --json` result, or `aitk cost --last 1` after the run |
 | Ollama time per agent | Logged by `ollama_stream.py` to `~/.claude/scripts/agent_token_stats.json` |
-| Tests passed | `pytest benchmarks/app_XX/tests/ -v` exit output |
+| Tests passed | `pytest benchmarks/app_XX/tests/ -v` exit output, or the `final_pass_count`/`final_fail_count` fields in the `aitk generate --json` result |
 | Review iterations | Count how many times Claude flagged issues and re-requested |
-| Wall clock time | `time python main.py ...` or note start/end time manually |
+| Wall clock time | `time aitk generate ...` or note start/end time manually |
 
 ---
 
