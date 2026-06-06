@@ -72,7 +72,7 @@ async def _generate_ollama(
 
     # Iteration 1
     if verbose:
-        print(f"[1/3] Generating with Ollama ({model})...")
+        print(f"[1/3] Generating with Ollama ({model})...", file=sys.stderr)
     code, ollama_stats = await ollama_generate(
         user_prompt=_coder_prompt(spec_body),
         frameworks=frameworks,
@@ -80,24 +80,24 @@ async def _generate_ollama(
     )
     Path(output_path).write_text(code)
     if verbose:
-        print(f"      {ollama_stats['response_tokens']} tokens  {ollama_stats['tokens_per_second']} tok/s  {ollama_stats['elapsed_s']}s")
+        print(f"      {ollama_stats['response_tokens']} tokens  {ollama_stats['tokens_per_second']} tok/s  {ollama_stats['elapsed_s']}s", file=sys.stderr)
 
     if verbose:
-        print("[2/3] Running tests...")
+        print("[2/3] Running tests...", file=sys.stderr)
     passed, test_out = _run_tests(test_dir)
     pass_count = test_out.count(" PASSED")
     fail_count = test_out.count(" FAILED")
     if verbose:
-        print(f"      {pass_count} passed  {fail_count} failed")
+        print(f"      {pass_count} passed  {fail_count} failed", file=sys.stderr)
 
     if verbose:
-        print("[3/3] Claude review...")
+        print("[3/3] Claude review...", file=sys.stderr)
     spec_for_review = Path(output_path).parent.parent / "SPEC.md"
     full_spec = spec_for_review.read_text() if spec_for_review.exists() else spec_body
     review = claude_review(full_spec, code, test_out)
     usage = review.pop("_usage")
     if verbose:
-        print(f"      passed={review['passed']}  issues={len(review['issues'])}  tokens={usage['input_tokens']}in/{usage['output_tokens']}out")
+        print(f"      passed={review['passed']}  issues={len(review['issues'])}  tokens={usage['input_tokens']}in/{usage['output_tokens']}out", file=sys.stderr)
 
     iterations.append({
         "iteration": 1,
@@ -112,7 +112,7 @@ async def _generate_ollama(
     blocking = [i for i in review.get("issues", []) if i["severity"] == "error"]
     if blocking:
         if verbose:
-            print(f"\n[retry] {len(blocking)} blocking issue(s). Regenerating...")
+            print(f"\n[retry] {len(blocking)} blocking issue(s). Regenerating...", file=sys.stderr)
         code2, stats2 = await ollama_generate(
             user_prompt=_retry_prompt(spec_body, code, blocking),
             frameworks=frameworks,
@@ -120,18 +120,18 @@ async def _generate_ollama(
         )
         Path(output_path).write_text(code2)
         if verbose:
-            print(f"        {stats2['response_tokens']} tokens  {stats2['elapsed_s']}s")
+            print(f"        {stats2['response_tokens']} tokens  {stats2['elapsed_s']}s", file=sys.stderr)
 
         passed2, test_out2 = _run_tests(test_dir)
         pass_count2 = test_out2.count(" PASSED")
         fail_count2 = test_out2.count(" FAILED")
         if verbose:
-            print(f"        {pass_count2} passed  {fail_count2} failed")
+            print(f"        {pass_count2} passed  {fail_count2} failed", file=sys.stderr)
 
         review2 = claude_review(full_spec, code2, test_out2)
         usage2 = review2.pop("_usage")
         if verbose:
-            print(f"        passed={review2['passed']}  tokens={usage2['input_tokens']}in/{usage2['output_tokens']}out")
+            print(f"        passed={review2['passed']}  tokens={usage2['input_tokens']}in/{usage2['output_tokens']}out", file=sys.stderr)
 
         iterations.append({
             "iteration": 2,
@@ -174,7 +174,7 @@ async def _generate_claude(
         raise EnvironmentError("ANTHROPIC_API_KEY is not set")
 
     if verbose:
-        print("[1/2] Generating with Claude...")
+        print("[1/2] Generating with Claude...", file=sys.stderr)
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-4-6",
@@ -193,15 +193,15 @@ async def _generate_claude(
     input_tokens  = message.usage.input_tokens
     output_tokens = message.usage.output_tokens
     if verbose:
-        print(f"      {output_tokens} tokens out  {input_tokens}in/{output_tokens}out")
+        print(f"      {output_tokens} tokens out  {input_tokens}in/{output_tokens}out", file=sys.stderr)
 
     if verbose:
-        print("[2/2] Running tests...")
+        print("[2/2] Running tests...", file=sys.stderr)
     passed, test_out = _run_tests(test_dir)
     pass_count = test_out.count(" PASSED")
     fail_count = test_out.count(" FAILED")
     if verbose:
-        print(f"      {pass_count} passed  {fail_count} failed")
+        print(f"      {pass_count} passed  {fail_count} failed", file=sys.stderr)
 
     return {
         "route": "claude",
@@ -235,7 +235,7 @@ async def run_generate(
         resolved_route = decide_route(spec_body, estimated_lines)
         if verbose:
             tokens = (estimated_lines or 0) * 12 if estimated_lines else len(spec_body.split()) * 2
-            print(f"[route] auto → {resolved_route}  (estimated {tokens} output tokens, break-even 1225)")
+            print(f"[route] auto → {resolved_route}  (estimated {tokens} output tokens, break-even 1225)", file=sys.stderr)
 
     t_start = time.monotonic()
 
