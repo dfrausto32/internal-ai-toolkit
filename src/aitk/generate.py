@@ -25,6 +25,16 @@ def _run_tests(test_dir: str) -> tuple[bool, str]:
     return result.returncode == 0, output
 
 
+def _condense_for_review(test_output: str) -> str:
+    """Strip per-test PASSED lines before sending pytest output to Claude review.
+
+    These lines carry no diagnostic value (the reviewer needs failure detail,
+    not a pass-spam listing) and their count scales with the test suite size —
+    on a 13-test spec they made up ~80% of the review's test-output tokens.
+    """
+    return "\n".join(line for line in test_output.splitlines() if " PASSED" not in line)
+
+
 def _coder_prompt(spec_body: str) -> str:
     """Build the initial generation prompt from spec body text."""
     return (
@@ -94,7 +104,7 @@ async def _generate_ollama(
         print("[3/3] Claude review...", file=sys.stderr)
     spec_for_review = Path(output_path).parent.parent / "SPEC.md"
     full_spec = spec_for_review.read_text() if spec_for_review.exists() else spec_body
-    review = claude_review(full_spec, code, test_out)
+    review = claude_review(full_spec, code, _condense_for_review(test_out))
     usage = review.pop("_usage")
     if verbose:
         print(f"      passed={review['passed']}  issues={len(review['issues'])}  tokens={usage['input_tokens']}in/{usage['output_tokens']}out", file=sys.stderr)
@@ -128,7 +138,7 @@ async def _generate_ollama(
         if verbose:
             print(f"        {pass_count2} passed  {fail_count2} failed", file=sys.stderr)
 
-        review2 = claude_review(full_spec, code2, test_out2)
+        review2 = claude_review(full_spec, code2, _condense_for_review(test_out2))
         usage2 = review2.pop("_usage")
         if verbose:
             print(f"        passed={review2['passed']}  tokens={usage2['input_tokens']}in/{usage2['output_tokens']}out", file=sys.stderr)
