@@ -16,6 +16,10 @@ _TEMPLATE = """\
 ## Spec
 {spec}
 
+## Environment (ground truth — these are the ACTUAL installed versions; do not assume \
+or guess a different version when diagnosing import/API issues)
+{installed_versions}
+
 ## Generated code
 ```python
 {code}
@@ -54,8 +58,8 @@ Output this exact JSON structure:
 """
 
 
-def claude_review(spec: str, code: str, test_output: str) -> dict:
-    """Call Claude to review generated code against the spec and test results."""
+def claude_review(spec: str, code: str, test_output: str, installed_versions: str) -> dict:
+    """Call Claude to review generated code against the spec, test results, and real installed versions."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise EnvironmentError("ANTHROPIC_API_KEY is not set")
@@ -66,7 +70,7 @@ def claude_review(spec: str, code: str, test_output: str) -> dict:
         max_tokens=2048,
         system=_SYSTEM,
         messages=[{"role": "user", "content": _TEMPLATE.format(
-            spec=spec, code=code, test_output=test_output
+            spec=spec, code=code, test_output=test_output, installed_versions=installed_versions
         )}],
     )
 
