@@ -8,35 +8,69 @@ OLLAMA_URL = "http://localhost:11434"
 
 _BASE_RULES = (
     "You are an expert software developer. Write production-quality, well-structured Python code. "
-    "Follow every rule below without exception. "
-    "STDLIB FIRST: Use only Python standard library unless the spec explicitly names a third-party "
-    "package. Never import FastAPI, SQLAlchemy, Pydantic, or any other framework unless the spec "
-    "requires it. "
-    "DOCUMENTATION: Add a one-line docstring to every function and class. "
-    "DEFENSIVE CHECKS: Before processing any collection of inputs (CSV rows, dict keys, list items), "
-    "validate that all required fields/columns exist first — raise ValueError with a clear message "
-    "immediately; do not let a missing field surface as KeyError inside the processing loop. "
-    "NUMERIC VALIDATION: When checking whether a numeric field is absent, use 'value is None', "
-    "never 'not value' — 'not 0' is True and would incorrectly reject a valid zero. "
-    "OUTPUT FORMAT: Return ONLY raw Python code. Do not wrap output in markdown fences. "
-    "Do not include backticks, ```python, or any markup. "
-    "Your response must begin with the first line of Python code."
+    "Follow every rule below exactly — they are requirements, not suggestions.\n"
+    "\n"
+    "1. STDLIB FIRST: use only the Python standard library unless the spec explicitly names a "
+    "third-party package. Never import FastAPI, SQLAlchemy, Pydantic, or any other framework "
+    "unless the spec requires it.\n"
+    "2. DOCUMENTATION: every function and class gets a one-line docstring — including small "
+    "helpers, route handlers, and model classes. No exceptions.\n"
+    "3. DEFENSIVE CHECKS: before processing any collection of inputs (CSV rows, dict keys, "
+    "list items, request bodies), validate that all required fields/columns exist first — raise "
+    "ValueError with a clear message immediately; never let a missing field surface as KeyError "
+    "mid-loop.\n"
+    "4. NULL-SAFETY: for any value that might legitimately be None, zero, an empty string, or an "
+    "empty collection, check `value is None` — never `not value`. `not 0`, `not \"\"`, and "
+    "`not []` are all True and would wrongly reject valid data.\n"
+    "5. OUTPUT FORMAT: return ONLY raw Python code. No markdown fences, no backticks, no "
+    "```python, no explanation. Your response begins with the first line of Python code."
 )
 
-# Injected only when the spec's `frameworks` list includes the matching key
+# Injected only when the spec's `frameworks` list includes the matching key.
+# Each rule below leads with a concrete code pattern rather than prose: qwen2.5-coder's
+# training-data priors for these libraries skew toward older APIs (SQLAlchemy 1.x style,
+# Pydantic v1, undocumented FastAPI routes), and a worked example competes with those
+# priors far more reliably than a one-line instruction telling it not to use them.
 _FRAMEWORK_RULES: dict[str, str] = {
     "pydantic": (
-        "IF USING PYDANTIC: Use Pydantic v2 — import BaseModel and Field from pydantic "
-        "(not pydantic.v1); use model_config = ConfigDict(from_attributes=True) instead of orm_mode."
+        "IF USING PYDANTIC: match this exact pattern (Pydantic v2) — substitute your own "
+        "field names —\n"
+        "    from pydantic import BaseModel, ConfigDict, Field\n"
+        "\n"
+        "    class ItemCreate(BaseModel):\n"
+        "        \"\"\"Request schema for creating an item.\"\"\"\n"
+        "        model_config = ConfigDict(from_attributes=True)\n"
+        "        name: str = Field(..., description=\"Item name\")\n"
+        "\n"
+        "Never import from pydantic.v1, never write `class Config` or `orm_mode = True` — "
+        "model_config = ConfigDict(...) replaces both."
     ),
     "sqlalchemy": (
-        "IF USING SQLALCHEMY: Use SQLAlchemy 2.0 — import DeclarativeBase from sqlalchemy.orm "
-        "(not sqlalchemy.ext.declarative); define Base as 'class Base(DeclarativeBase): pass'; "
-        "never call declarative_base()."
+        "IF USING SQLALCHEMY: match this exact pattern for the declarative base (SQLAlchemy "
+        "2.0) — keep using Column for fields, only the base changes —\n"
+        "    from sqlalchemy import Column, Integer\n"
+        "    from sqlalchemy.orm import DeclarativeBase\n"
+        "\n"
+        "    class Base(DeclarativeBase):\n"
+        "        \"\"\"Declarative base shared by all ORM models.\"\"\"\n"
+        "\n"
+        "    class Item(Base):\n"
+        "        \"\"\"ORM model for an item row.\"\"\"\n"
+        "        __tablename__ = \"items\"\n"
+        "        id = Column(Integer, primary_key=True)\n"
+        "\n"
+        "Never import from sqlalchemy.ext.declarative and never call declarative_base() — "
+        "class Base(DeclarativeBase) replaces it entirely."
     ),
     "fastapi": (
-        "IF USING FASTAPI: Register routes without trailing slashes (/tasks not /tasks/). "
-        "Add docstrings to all route functions and Pydantic model classes."
+        "IF USING FASTAPI: register routes without trailing slashes (/tasks not /tasks/). "
+        "Every route function gets a one-line docstring directly under its decorator and "
+        "signature — and so does every Pydantic request/response model class. Match this "
+        "shape exactly —\n"
+        "    @app.get(\"/items/{item_id}\")\n"
+        "    def read_item(item_id: int, db: Session = Depends(get_db)) -> ItemOut:\n"
+        "        \"\"\"Fetch a single item by its ID.\"\"\"\n"
+        "        ...\n"
     ),
 }
 
@@ -48,7 +82,7 @@ def build_system_prompt(frameworks: list[str]) -> str:
         rule = _FRAMEWORK_RULES.get(fw.lower().strip())
         if rule:
             parts.append(rule)
-    return " ".join(parts)
+    return "\n\n".join(parts)
 
 
 def _strip_fences(text: str) -> str:
