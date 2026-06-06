@@ -34,7 +34,9 @@ docs: update roadmap Phase 1 task status
 
 ## Adding or Editing an Agent
 
-Agent definitions live in `agents/`. Each is a Markdown file with YAML frontmatter that Claude Code reads.
+Agent definitions live in `.claude/agents/`. Claude Code discovers them automatically when run from the repo root — no copying or installation step needed.
+
+Each agent is a Markdown file with YAML frontmatter:
 
 ```markdown
 ---
@@ -46,13 +48,11 @@ tools: [Bash, Read]
 System prompt goes here...
 ```
 
-After editing, install to Claude Code's agent directory:
+Claude Code picks up edits immediately. To promote an agent to global availability (accessible from any directory), copy it to `~/.claude/agents/`:
 
 ```bash
-cp agents/ollama-coder.md ~/.claude/agents/ollama-coder.md
+cp .claude/agents/ollama-coder.md ~/.claude/agents/ollama-coder.md
 ```
-
-Claude Code picks up changes immediately — no restart needed.
 
 **When tuning prompts:** add a comment block at the bottom of the `.md` file noting what you changed and why. This becomes the paper trail for Phase 3 prompt design.
 

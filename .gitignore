@@ -15,6 +15,9 @@ build/
 # Generated benchmark output (never commit generated code)
 benchmarks/*/generated/
 
+# Test database files created during benchmark runs
+benchmarks/*/test_tasks.db
+
 # Pytest
 .pytest_cache/
 *.pytest_cache

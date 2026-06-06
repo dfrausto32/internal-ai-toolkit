@@ -34,18 +34,19 @@ Model selection is tuned for 16 GB VRAM. See `docs/ollama-setup.md` for other ha
 ```
 internal-ai-toolkit/
 ├── README.md                        ← You are here
+├── .claude/
+│   └── agents/                      ← Phase 1: project-local Claude Code subagents
+│       ├── ollama-coder.md
+│       ├── ollama-tester.md
+│       ├── ollama-pipeline.md
+│       └── ollama-notifier.md
 ├── docs/
 │   ├── ollama-setup.md              ← Ollama install + WSL2 setup guide
 │   ├── roadmap.md                   ← Development phases and upcoming work
 │   └── contributing.md              ← How to work in this repo
-├── agents/                          ← Phase 1: Claude Code .md subagent definitions
-│   ├── ollama-coder.md
-│   ├── ollama-tester.md
-│   ├── ollama-pipeline.md
-│   └── ollama-notifier.md
 ├── scripts/
 │   └── ollama_stream.py             ← Helper script agents call to invoke Ollama
-├── orchestrator/                    ← Phase 2: Claude Agent SDK implementation
+├── orchestrator/                    ← Phase 3: Claude Agent SDK implementation
 │   ├── main.py
 │   ├── agents.py
 │   └── requirements.txt
