@@ -1,0 +1,24 @@
+name: aitk-generate smoke test
+
+# Manually-triggered regression check for the aitk-generate reusable workflow
+# itself. Runs a tiny, cheap spec through the real pipeline (checkout, install,
+# generate, test, outputs) so changes to aitk-generate.yml or src/aitk/ can be
+# verified in actual GitHub Actions before other repos depend on them.
+#
+# Run it from the Actions tab, or:
+#   gh workflow run "aitk-generate smoke test" --ref <branch>
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/aitk-generate.yml
+    with:
+      spec:    .github/aitk-smoke/SPEC.md
+      output:  .github/aitk-smoke/generated/smoke.py
+      tests:   .github/aitk-smoke/tests/
+      route:   claude   # force claude — fast, no Ollama install, cheap on a 12-line spec
+      open_pr: false    # plumbing check only, never opens a PR
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

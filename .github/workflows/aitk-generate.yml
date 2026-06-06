@@ -1,0 +1,171 @@
+name: aitk-generate (reusable)
+
+# Reusable workflow: generate a Python module from a spec, run tests,
+# open a PR if tests pass.
+#
+# Usage in another repo:
+#
+#   jobs:
+#     generate:
+#       uses: dfrausto32/internal-ai-toolkit/.github/workflows/aitk-generate.yml@main
+#       with:
+#         spec: docs/SPEC.md
+#         output: src/api.py
+#         tests: tests/
+#       secrets:
+#         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      spec:
+        description: "Path to the SPEC.md file (relative to calling repo root)"
+        required: true
+        type: string
+      output:
+        description: "Output path for the generated file"
+        required: true
+        type: string
+      tests:
+        description: "Path to the pytest test directory"
+        required: true
+        type: string
+      route:
+        description: "Generation route: auto, ollama, or claude (default: auto)"
+        required: false
+        type: string
+        default: "auto"
+      model:
+        description: "Ollama model name (used when route=ollama)"
+        required: false
+        type: string
+        default: "qwen2.5-coder:14b"
+      python_version:
+        description: "Python version to use"
+        required: false
+        type: string
+        default: "3.11"
+      open_pr:
+        description: "Open a PR with the generated file if tests pass (default: true)"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: "Anthropic API key — required for Claude review and claude route"
+        required: true
+    outputs:
+      pass_count:
+        description: "Number of tests that passed"
+        value: ${{ jobs.generate.outputs.pass_count }}
+      fail_count:
+        description: "Number of tests that failed"
+        value: ${{ jobs.generate.outputs.fail_count }}
+      route_used:
+        description: "The route that was used (ollama or claude)"
+        value: ${{ jobs.generate.outputs.route_used }}
+      cost_usd:
+        description: "Estimated Claude API cost in USD"
+        value: ${{ jobs.generate.outputs.cost_usd }}
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    outputs:
+      pass_count: ${{ steps.run.outputs.pass_count }}
+      fail_count: ${{ steps.run.outputs.fail_count }}
+      route_used: ${{ steps.run.outputs.route_used }}
+      cost_usd:   ${{ steps.run.outputs.cost_usd }}
+
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@v4
+
+      - name: Install aitk from internal-ai-toolkit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/internal-ai-toolkit
+          path: _aitk_src
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python ${{ inputs.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: pip
+
+      - name: Install aitk and calling repo dependencies
+        run: |
+          pip install -e _aitk_src
+          # Install calling repo dependencies if a requirements file exists
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pytest
+
+      - name: Start Ollama (only for ollama route)
+        if: inputs.route == 'ollama'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull ${{ inputs.model }}
+
+      - name: Run aitk generate
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          aitk generate \
+            --spec "${{ inputs.spec }}" \
+            --out  "${{ inputs.output }}" \
+            --tests "${{ inputs.tests }}" \
+            --route "${{ inputs.route }}" \
+            --model "${{ inputs.model }}" \
+            --json > result.json
+          echo "pass_count=$(jq '.final_pass_count' result.json)" >> $GITHUB_OUTPUT
+          echo "fail_count=$(jq '.final_fail_count' result.json)" >> $GITHUB_OUTPUT
+          echo "route_used=$(jq -r '.route' result.json)"         >> $GITHUB_OUTPUT
+          echo "cost_usd=$(jq '.estimated_cost_usd' result.json)" >> $GITHUB_OUTPUT
+
+      - name: Upload generated file as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-${{ github.run_id }}
+          path: |
+            ${{ inputs.output }}
+            result.json
+
+      - name: Open PR with generated file
+        if: inputs.open_pr && steps.run.outputs.fail_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="aitk/generated-$(date +%Y%m%d-%H%M%S)"
+          git config user.name  "aitk-bot"
+          git config user.email "aitk-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "${{ inputs.output }}"
+          git commit -m "feat: generate ${{ inputs.output }} from ${{ inputs.spec }}
+
+          Route: $(jq -r '.route' result.json)
+          Tests: $(jq '.final_pass_count' result.json) passed
+          Cost:  \$$(jq '.estimated_cost_usd' result.json) USD
+
+          Generated by aitk via internal-ai-toolkit."
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "feat: generated $(basename ${{ inputs.output }})" \
+            --body "$(cat <<EOF
+          ## Generated by aitk
+
+          **Spec:** \`${{ inputs.spec }}\`
+          **Output:** \`${{ inputs.output }}\`
+          **Route:** $(jq -r '.route' result.json)
+          **Tests:** $(jq '.final_pass_count' result.json) passed / $(jq '.final_fail_count' result.json) failed
+          **Estimated cost:** \$$(jq '.estimated_cost_usd' result.json) USD
+
+          Review the generated code before merging. Claude review notes are in the artifact.
+          EOF
+          )" \
+            --head "$BRANCH" \
+            --base "${{ github.event.repository.default_branch }}"
