@@ -12,7 +12,7 @@ This document tracks what's been done, what's in progress, and what comes next. 
 | 1 — Subagent `.md` files | ✅ Complete | Claude Code agent definitions + Ollama helper script |
 | 2 — Benchmarks | ✅ Complete | Three test apps, scoring rubric, Phase 1 and Phase 3 results |
 | 3 — Orchestrator | ✅ Complete | Python orchestrator, Claude review loop, routing analysis |
-| 4 — Cross-Repo Integration | 🔄 In Progress | Installable CLI, spec convention, GitHub Actions reusable workflow |
+| 4 — Cross-Repo Integration | ✅ Complete | Installable CLI, spec convention, GitHub Actions reusable workflow |
 
 ---
 
@@ -88,7 +88,7 @@ Full results and notes → `benchmarks/README.md`
 
 ---
 
-## Phase 4 — Cross-Repo Integration 🔄
+## Phase 4 — Cross-Repo Integration ✅
 
 **Goal:** Turn the orchestrator into a tool other repos can actually use. Right now it's a benchmark runner tied to this repo's directory structure. Phase 4 makes it a general-purpose CLI that any repo can call against its own specs, with a reusable GitHub Actions workflow and a minimal spec convention.
 
@@ -112,12 +112,12 @@ The `--route auto` flag applies the routing decision automatically:
 - Can be overridden with `--route ollama` or `--route claude`
 
 **Tasks:**
-- [ ] Add `pyproject.toml` with `[project.scripts]` entry point for `aitk`
-- [ ] Move `orchestrator/` logic into `src/aitk/` package structure
-- [ ] Implement `aitk generate` CLI command with `--spec`, `--out`, `--tests`, `--route` flags
-- [ ] Implement routing estimator: count spec tokens, estimate output size, decide route
-- [ ] Add `aitk cost` subcommand: show token cost breakdown for the last run
-- [ ] Write `docs/install.md` — how to add this as a dev dependency in another repo
+- [x] Add `pyproject.toml` with `[project.scripts]` entry point for `aitk`
+- [x] Move `orchestrator/` logic into `src/aitk/` package structure
+- [x] Implement `aitk generate` CLI command with `--spec`, `--out`, `--tests`, `--route` flags
+- [x] Implement routing estimator: count spec tokens, estimate output size, decide route
+- [x] Add `aitk cost` subcommand: show token cost breakdown for the last run
+- [x] Write `docs/install.md` — how to add this as a dev dependency in another repo
 
 ### Piece 2 — Spec Convention
 
@@ -137,10 +137,10 @@ test_command: pytest tests/
 The `framework:` field replaces the current static system prompt with a dynamic one — only inject FastAPI/SQLAlchemy/Pydantic rules when the spec declares those frameworks.
 
 **Tasks:**
-- [ ] Define the spec frontmatter schema (language, framework, estimated_lines, test_command)
-- [ ] Update `orchestrator/agents.py` to build system prompt dynamically from spec metadata
-- [ ] Update all three benchmark `SPEC.md` files to use the new frontmatter
-- [ ] Write `docs/spec-format.md` — how to write a spec for use with `aitk`
+- [x] Define the spec frontmatter schema (language, framework, estimated_lines, test_command)
+- [x] Update `src/aitk/agents.py` to build system prompt dynamically from spec metadata
+- [x] Update all three benchmark `SPEC.md` files to use the new frontmatter
+- [x] Write `docs/spec-format.md` — how to write a spec for use with `aitk`
 
 ### Piece 3 — GitHub Actions Reusable Workflow
 
@@ -164,11 +164,11 @@ jobs:
 The workflow handles: install `aitk`, run generation, upload the generated file as an artifact, post a PR with the result if tests pass.
 
 **Tasks:**
-- [ ] Write `.github/workflows/aitk-generate.yml` as a reusable `workflow_call` workflow
-- [ ] Workflow inputs: `spec`, `output`, `tests`, `route` (default: `auto`)
-- [ ] Workflow outputs: test pass/fail count, Claude cost, generated file artifact
-- [ ] Add PR creation step: if tests pass, open a PR in the calling repo with the generated file
-- [ ] Write `docs/github-actions.md` — how to reference the workflow from another repo
+- [x] Write `.github/workflows/aitk-generate.yml` as a reusable `workflow_call` workflow
+- [x] Workflow inputs: `spec`, `output`, `tests`, `route` (default: `auto`)
+- [x] Workflow outputs: test pass/fail count, Claude cost, generated file artifact
+- [x] Add PR creation step: if tests pass, open a PR in the calling repo with the generated file
+- [x] Write `docs/github-actions.md` — how to reference the workflow from another repo
 
 ### Definition of Done
 
