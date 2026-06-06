@@ -23,10 +23,11 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         )
     )
     if not args.quiet:
-        print(f"\n--- Result ---")
+        print(f"\n--- Result ---", file=sys.stderr)
         print(f"route={result['route']}  iterations={result['iterations']}  "
               f"passed={result['final_pass_count']}  failed={result['final_fail_count']}  "
-              f"cost=${result['estimated_cost_usd']:.4f}  elapsed={result['total_elapsed_s']}s")
+              f"cost=${result['estimated_cost_usd']:.4f}  elapsed={result['total_elapsed_s']}s",
+              file=sys.stderr)
 
     if args.json:
         print(json.dumps(result, indent=2))
