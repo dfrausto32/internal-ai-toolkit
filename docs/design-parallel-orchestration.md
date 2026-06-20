@@ -153,7 +153,59 @@ enforce a global ceiling.
 
 Trade-off accepted: a planner-as-API-call reasons in one shot rather than multi-step with
 tools. Mitigation: selectively upgrade *only* planner nodes to spawned agents where the
-extra reasoning pays for itself — the choice is per-node, not global.
+extra reasoning pays for itself — the choice is per-node, not global. The planner is the one
+node where this choice is non-obvious; §6a specifies how it resolves.
+
+### 6a. The planner — a tiered component
+
+The planner is the only node where "API call vs agent" is a real contest (worker, tester,
+and reviewer are structured enough that a direct API call is always right). It resolves by
+splitting the planner into two separable halves and making only the first half pluggable:
+
+- **Understand** — what already exists, the conventions, where new code plugs in.
+- **Decide** — emit the module list, the dependency edges, the per-node specs.
+
+The **decide** half is *always* a structured API call — you want a machine-checkable DAG.
+The substrate debate is only about **understand**, and it splits by target:
+
+- *Greenfield, spec-is-the-world* (today's benchmarks): nothing to explore; an agent's
+  repo-reading buys nothing.
+- *Brownfield, "add feature X to this repo"* (the stated vision): plan quality depends on
+  reading real code — exactly what an agent does and a blind API call can't.
+
+**The clean seam: both paths emit the identical validated DAG, so the scheduler never knows
+which produced it.**
+
+**1 — Context-gatherer (deterministic, always runs first).** No LLM, trivially in-budget.
+Collects the mechanically-discoverable facts: repo file tree, existing public interfaces
+(signatures via AST / grep — the same interface data the result store uses in §8), the
+dependency manifest, any existing `SPEC.md`s. For greenfield this blob is near-empty, which
+is correct.
+
+**2 — Planner API call = the "decide" (default path).** Input: feature spec + repo context.
+Output forced to a structured DAG via tool-use JSON —
+`nodes: [{ id, spec, framework, depends_on: [...], estimated_lines, route_hint }]` — then
+validated in Python (acyclic, every `depends_on` resolves, no orphans). Invalid → cheap
+reject + retry. Stays inside the API lease.
+
+**3 — Escalation as a fallback, NOT an upfront gate.** Do not try to *predict* whether a
+repo is messy enough to need an agent — that prediction itself needs judgment. Instead, give
+the API planner an explicit `needs_exploration` escape hatch in its output schema ("I can't
+resolve where this feature integrates from the context given"). Only when it raises that flag
+do you spawn the agent. You pay for the agent exactly when the cheap path *admits defeat* —
+never speculatively. Greenfield never triggers it; clean brownfield rarely does.
+
+**4 — Budget-capped agent wrapper (the escalation target).** Spawned with a hard token/cost
+cap; on exceed it returns its best partial DAG. Its output runs through the *same* DAG
+validation as path 2. That bounds the budget hole an agent otherwise opens — it can't run
+away, and if it tries it degrades to a validated-partial plan rather than blowing the ceiling.
+
+**Trade-off accepted:** the `needs_exploration` self-report isn't perfect — a
+confidently-wrong planner can skip the hatch and emit a plausible-but-misgrounded DAG. The
+reviewer gate catches *code* drift downstream, but a bad *decomposition* slips through
+earlier. Mitigation if it bites (not worth building until it does): a cheap validation pass
+checking the proposed DAG's nodes against the real interfaces the context-gatherer already
+collected.
 
 ---
 
@@ -162,7 +214,7 @@ extra reasoning pays for itself — the choice is per-node, not global.
 | Decision | Options | Default leaning |
 |----------|---------|-----------------|
 | **Failure policy** | (a) skip failed node's subtree, finish independent branches; (b) fail-fast, halt the DAG | Make it a **pluggable hook**; pick default at build time. (Parked per design discussion.) |
-| **Planner upgrade** | API-call planner vs spawned-agent planner | Start API-call; upgrade per-node if reasoning is insufficient |
+| **Planner substrate** | API-call vs spawned-agent | **Resolved (§6a):** tiered — deterministic context-gatherer + API-call decide by default; escalate to a budget-capped agent only on a `needs_exploration` self-report |
 | **GPU concurrency** | serialize all Ollama; or per-model leases (14b + 3b co-resident) | Ignore for now — Ollama is not the dominant path |
 
 ---

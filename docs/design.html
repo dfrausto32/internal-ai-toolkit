@@ -120,6 +120,7 @@
     <a href="#scheduler">The scheduler</a>
     <a href="#leases">Concurrency &amp; leases</a>
     <a href="#substrate">Execution substrate</a>
+    <a href="#planner">The planner (tiered)</a>
     <a href="#hazards">Shared-state hazards</a>
     <a href="#open">Open decisions</a>
     <a href="#roadmap">Where this sits</a>
@@ -309,6 +310,64 @@ repeat until DAG drained</pre>
       </div>
     </section>
 
+    <!-- PLANNER -->
+    <section id="planner">
+      <h2>The planner — a tiered component</h2>
+      <p class="lead">The only node where "API call vs agent" is a real contest. It resolves by splitting the planner in two and making just one half pluggable.</p>
+
+      <div class="grid2">
+        <div class="leasecard"><h4 class="c-work">Understand</h4><div class="b">What already exists, the conventions, where new code plugs in. <b>This is the only half the substrate debate touches.</b></div></div>
+        <div class="leasecard"><h4 class="c-plan">Decide</h4><div class="b"><b>Always a structured API call</b> — emit the module list + dependency edges as a machine-checkable DAG.</div></div>
+      </div>
+
+      <div class="call key">
+        <div class="h">The clean seam</div>
+        Both paths emit the <b>identical validated DAG</b>, so the scheduler never knows which produced it. Greenfield → near-empty context, agent buys nothing. Brownfield → grounding matters.
+      </div>
+
+      <div class="panel" style="text-align:center">
+        <svg viewBox="0 0 660 250" width="100%" style="max-width:660px">
+          <!-- step 1 -->
+          <rect x="14" y="14" width="632" height="50" rx="9" fill="#1c2330" stroke="#4cc38a" stroke-width="1.5"/>
+          <text x="30" y="36" fill="#4cc38a" font-size="12" font-weight="700">1 · CONTEXT-GATHERER</text>
+          <text x="30" y="53" fill="#9aa7b6" font-size="11.5">deterministic · no LLM · file tree + public interfaces + manifest + existing specs → repo-context blob</text>
+          <path d="M330 64 L 330 80" stroke="#3a4556" stroke-width="1.5" marker-end="url(#arp)"/>
+          <!-- step 2 -->
+          <rect x="14" y="82" width="632" height="50" rx="9" fill="#1c2330" stroke="#7c93ff" stroke-width="1.5"/>
+          <text x="30" y="104" fill="#7c93ff" font-size="12" font-weight="700">2 · PLANNER API CALL  (the "decide" — default path)</text>
+          <text x="30" y="121" fill="#9aa7b6" font-size="11.5">spec + context → tool-use JSON DAG → validated (acyclic, deps resolve) · stays in the API lease</text>
+          <!-- branch -->
+          <path d="M330 132 L 330 150" stroke="#3a4556" stroke-width="1.5"/>
+          <text x="342" y="148" fill="#6b7888" font-size="10.5">raises needs_exploration?</text>
+          <path d="M330 150 L 150 150 L 150 168" stroke="#3a4556" stroke-width="1.5" marker-end="url(#arp)"/>
+          <text x="60" y="163" fill="#4cc38a" font-size="10.5">no → emit DAG ✓</text>
+          <path d="M330 150 L 510 150 L 510 168" stroke="#ff7b72" stroke-width="1.5" marker-end="url(#arp)"/>
+          <text x="430" y="163" fill="#ff7b72" font-size="10.5">yes → escalate</text>
+          <!-- outcomes -->
+          <rect x="40" y="170" width="220" height="46" rx="9" fill="#10231a" stroke="#1f6f43" stroke-width="1.5"/>
+          <text x="150" y="190" fill="#e6edf3" font-size="12" text-anchor="middle" font-weight="600">DAG → scheduler</text>
+          <text x="150" y="206" fill="#9aa7b6" font-size="10.5" text-anchor="middle">greenfield + clean brownfield</text>
+          <rect x="400" y="170" width="220" height="46" rx="9" fill="#241516" stroke="#7a3a3a" stroke-width="1.5"/>
+          <text x="510" y="189" fill="#e6edf3" font-size="12" text-anchor="middle" font-weight="600">4 · budget-capped agent</text>
+          <text x="510" y="205" fill="#9aa7b6" font-size="10.5" text-anchor="middle">reads repo · same DAG validation</text>
+          <!-- agent rejoins -->
+          <path d="M510 216 L 510 232 L 150 232 L 150 218" stroke="#3a4556" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arp)"/>
+          <text x="330" y="246" fill="#6b7888" font-size="10" text-anchor="middle">partial-but-validated DAG rejoins the same path</text>
+          <defs><marker id="arp" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3a4556"/></marker></defs>
+        </svg>
+      </div>
+
+      <div class="call rec">
+        <div class="h">✓ Why fallback, not gate</div>
+        Don't <em>predict</em> whether a repo is messy enough to need an agent — that prediction itself needs judgment. Let the cheap path run and <b>self-report failure</b> via a <code>needs_exploration</code> flag. You pay for the agent only when the cheap path admits defeat — never speculatively.
+      </div>
+
+      <div class="call trap">
+        <div class="h">⚠ Trade-off accepted</div>
+        A confidently-wrong planner can skip the hatch and emit a plausible-but-misgrounded DAG. The reviewer catches <em>code</em> drift downstream, but a bad <em>decomposition</em> slips through earlier. Mitigation if it bites (don't build until it does): validate the DAG's nodes against the real interfaces the context-gatherer already collected.
+      </div>
+    </section>
+
     <!-- HAZARDS -->
     <section id="hazards">
       <h2>Shared-state hazards — the real implementation work</h2>
@@ -332,7 +391,7 @@ repeat until DAG drained</pre>
       <table>
         <tr><th>Decision</th><th>Options</th><th>Default leaning</th></tr>
         <tr><td>Failure policy</td><td>(a) skip failed node's subtree, finish independent branches; (b) fail-fast, halt the DAG</td><td>Pluggable hook; pick default at build time <span class="pill">parked</span></td></tr>
-        <tr><td>Planner upgrade</td><td>API-call planner vs spawned-agent planner</td><td>Start API-call; upgrade per-node if reasoning falls short</td></tr>
+        <tr><td>Planner substrate</td><td>API-call vs spawned-agent</td><td><b>Resolved</b> → tiered (see <a href="#planner">The planner</a>): context-gatherer + API-call by default, agent only on <code>needs_exploration</code></td></tr>
         <tr><td>GPU concurrency</td><td>serialize all Ollama; or per-model leases (14b + 3b co-resident)</td><td>Ignore for now — Ollama not dominant</td></tr>
       </table>
     </section>
