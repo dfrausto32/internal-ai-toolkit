@@ -128,6 +128,7 @@ Claude review catches: wrong imports, schema drift, missing guards, falsy intege
 | [docs/github-actions.md](docs/github-actions.md) | Reusable workflow reference, inputs, outputs, CI routing advice |
 | [docs/ollama-setup.md](docs/ollama-setup.md) | Ollama install on WSL2 + NVIDIA GPU passthrough |
 | [docs/roadmap.md](docs/roadmap.md) | Phase history and what's next |
+| [docs/design-parallel-orchestration.md](docs/design-parallel-orchestration.md) | Phase 5 design — parallel orchestration architecture ([visual site](docs/design.html)) |
 | [benchmarks/README.md](benchmarks/README.md) | Benchmark methodology, scoring rubric, Phase 1–3 results |
 
 ---

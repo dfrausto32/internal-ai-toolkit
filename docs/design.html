@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 5 — Parallel Orchestration Design</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2d3645;
+    --ink:#e6edf3; --muted:#9aa7b6; --faint:#6b7888;
+    --plan:#7c93ff; --work:#4cc38a; --test:#f0b429; --review:#e5618a;
+    --sched:#c98bff; --accent:#58a6ff; --warn:#ff7b72;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;font-size:16px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);background:#1f2630;padding:1px 6px;border-radius:5px;font-size:.86em;color:#c9d6e3}
+
+  /* layout */
+  .wrap{display:grid;grid-template-columns:240px 1fr;max-width:1280px;margin:0 auto}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:32px 18px;border-right:1px solid var(--border)}
+  nav h1{font-size:15px;letter-spacing:.5px;margin:0 0 4px;color:var(--ink)}
+  nav .tag{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:24px;display:block}
+  nav a{display:block;color:var(--muted);font-size:13.5px;padding:6px 10px;border-radius:6px;border-left:2px solid transparent}
+  nav a:hover{background:var(--panel);color:var(--ink);text-decoration:none}
+  main{padding:48px 56px;min-width:0}
+  section{margin-bottom:64px;scroll-margin-top:24px}
+
+  .hero{padding:18px 0 8px}
+  .hero h1{font-size:34px;margin:0 0 8px;line-height:1.15;background:linear-gradient(92deg,#7c93ff,#4cc38a);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .hero p{color:var(--muted);font-size:17px;max-width:60ch;margin:.4em 0}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .badge{font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--panel);color:var(--muted)}
+  .badge.live{border-color:#1f6f43;color:#4cc38a;background:#11261b}
+
+  h2{font-size:24px;margin:0 0 6px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .lead{color:var(--muted);margin:0 0 24px;font-size:15.5px}
+  h3{font-size:17px;margin:28px 0 12px;color:var(--ink)}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;margin:18px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}.wrap{grid-template-columns:1fr}nav{display:none}main{padding:28px 20px}}
+
+  /* role colours */
+  .c-plan{color:var(--plan)} .c-work{color:var(--work)} .c-test{color:var(--test)}
+  .c-review{color:var(--review)} .c-sched{color:var(--sched)}
+
+  /* node boxes for hierarchy */
+  .stack{display:flex;flex-direction:column;align-items:center;gap:0}
+  .node{border:1.5px solid var(--border);border-radius:10px;padding:14px 20px;background:var(--panel2);text-align:center;min-width:280px}
+  .node .r{font-weight:600;font-size:15px}
+  .node .d{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .node.plan{border-color:var(--plan)} .node.work{border-color:var(--work)}
+  .node.test{border-color:var(--test)} .node.review{border-color:var(--review)}
+  .conn{width:2px;height:22px;background:var(--border)}
+  .conn.loop{position:relative}
+  .conn.loop::after{content:"⇅ loops";position:absolute;left:14px;top:2px;font-size:11px;color:var(--test);white-space:nowrap}
+  .conn-label{font-size:11px;color:var(--faint);padding:2px 0}
+
+  /* legend */
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:7px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* callouts */
+  .call{border-radius:10px;padding:16px 18px;margin:18px 0;border:1px solid var(--border);font-size:14.5px}
+  .call .h{font-weight:700;font-size:12px;letter-spacing:.6px;text-transform:uppercase;margin-bottom:6px}
+  .call.trap{border-color:#7a3a3a;background:#241516}.call.trap .h{color:var(--warn)}
+  .call.rec{border-color:#1f6f43;background:#10231a}.call.rec .h{color:#4cc38a}
+  .call.key{border-color:#5a4a8a;background:#191428}.call.key .h{color:var(--sched)}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--faint);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+  td code{white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+
+  /* code-ish flow block */
+  pre.flow{background:#0a0e14;border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;font-family:var(--mono);font-size:13px;color:#aeb9c7;line-height:1.7}
+  pre.flow b{color:var(--accent);font-weight:600}
+  pre.flow .g{color:#4cc38a}.pre .y{color:var(--test)}
+
+  /* phase timeline */
+  .timeline{display:flex;flex-direction:column;gap:0;margin-top:8px}
+  .ph{display:grid;grid-template-columns:30px 1fr;gap:16px}
+  .ph .rail{display:flex;flex-direction:column;align-items:center}
+  .ph .ball{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);background:var(--bg);margin-top:6px;flex:none}
+  .ph.done .ball{background:#4cc38a;border-color:#4cc38a}
+  .ph.next .ball{background:var(--sched);border-color:var(--sched);box-shadow:0 0 0 4px rgba(201,139,255,.18)}
+  .ph .line{width:2px;flex:1;background:var(--border);min-height:14px}
+  .ph .body{padding-bottom:22px}
+  .ph .body h4{margin:0;font-size:15px}
+  .ph .body p{margin:3px 0 0;color:var(--muted);font-size:13.5px}
+  .ph .st{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint)}
+  .ph.done .st{color:#4cc38a}.ph.next .st{color:var(--sched)}
+
+  /* lease cards */
+  .leasecard{border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--panel2)}
+  .leasecard h4{margin:0 0 6px;font-size:14px}
+  .leasecard .b{font-size:13px;color:var(--muted)}
+
+  footer{border-top:1px solid var(--border);padding:24px 0;color:var(--faint);font-size:13px;text-align:center}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:6px;background:#1f2630;color:var(--muted);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <h1>Phase 5</h1>
+    <span class="tag">Parallel Orchestration</span>
+    <a href="#overview">Overview</a>
+    <a href="#bottleneck">The shifted bottleneck</a>
+    <a href="#rule">One scheduler rule</a>
+    <a href="#roles">The four roles</a>
+    <a href="#scheduler">The scheduler</a>
+    <a href="#leases">Concurrency &amp; leases</a>
+    <a href="#substrate">Execution substrate</a>
+    <a href="#hazards">Shared-state hazards</a>
+    <a href="#open">Open decisions</a>
+    <a href="#roadmap">Where this sits</a>
+  </nav>
+
+  <main>
+    <div class="hero" id="overview">
+      <h1>Parallel Orchestration Design</h1>
+      <p>Promoting <code>aitk</code>'s single serial generate→test→review loop into a hierarchy of planning orchestrators, workers, testers, and reviewers — coordinated under one shared API budget.</p>
+      <div class="badges">
+        <span class="badge">Phase 5</span>
+        <span class="badge live">Design · not yet built</span>
+        <span class="badge">Companion: <a href="design-parallel-orchestration.md">design doc (md)</a></span>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <section>
+      <div class="panel">
+        <div class="grid2">
+          <div>
+            <h3 style="margin-top:0">Today — serial, single-file</h3>
+            <pre class="flow">spec
+ └─ <b>worker</b> generates
+     └─ pytest
+         └─ <b>Claude review</b>
+             └─ retry once
+<span style="color:#6b7888">one spec, one file, one await chain
+src/aitk/generate.py</span></pre>
+          </div>
+          <div>
+            <h3 style="margin-top:0">Phase 5 — hierarchy, parallel</h3>
+            <pre class="flow"><b class="g">orchestrators</b> plan features/projects
+ └─ submit a DAG of module nodes
+     └─ <b>one scheduler</b> drains all nodes
+         └─ each node: worker ⇅ tester → review
+<span style="color:#6b7888">many planners, one shared budget
+the loop above becomes a single leaf node</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOTTLENECK -->
+    <section id="bottleneck">
+      <h2>The bottleneck moved — design around the right one</h2>
+      <p class="lead">Phase 3 optimized for a scarce GPU. Phase 5's dominant path is Claude API calls, so the scarce resource is now global.</p>
+      <table>
+        <tr><th>Path</th><th>Bound by</th><th>Parallelizes?</th></tr>
+        <tr><td>Ollama generation</td><td>GPU — one RTX 4080, ~9&nbsp;GB for <code>qwen2.5-coder:14b</code></td><td><span class="c-review">No — serial on one card</span></td></tr>
+        <tr><td>Claude API (generate / review)</td><td>API rate limit + cost budget</td><td><span class="c-work">Yes — async fan-out</span></td></tr>
+      </table>
+      <div class="call key">
+        <div class="h">Consequence</div>
+        The limiter is the <b>Claude rate limit (RPM + TPM) and the cost budget</b> — both <em>global</em>. The GPU is demoted to a niche concern. Every decision below follows from: <em>the scarce resource is global API budget, not compute.</em>
+      </div>
+    </section>
+
+    <!-- RULE -->
+    <section id="rule">
+      <h2>The core rule: many planners, ONE scheduler</h2>
+      <p class="lead">"Multiple orchestrators" is a planning concept — not multiple execution engines.</p>
+
+      <div class="call trap">
+        <div class="h">⚠ The trap</div>
+        N independent orchestrators, each fanning out its own workers, against a <em>global</em> budget → rate-limit storms (429 thrash), no global cost ceiling, and file/test-dir collisions between unrelated projects.
+      </div>
+
+      <div class="panel" style="text-align:center">
+        <svg viewBox="0 0 640 240" width="100%" style="max-width:640px" font-family="var(--sans)">
+          <!-- planners -->
+          <g>
+            <rect x="10" y="20" width="150" height="44" rx="9" fill="#1c2330" stroke="#7c93ff" stroke-width="1.5"/>
+            <text x="85" y="40" fill="#e6edf3" font-size="13" text-anchor="middle">Orchestrator A</text>
+            <text x="85" y="56" fill="#9aa7b6" font-size="10.5" text-anchor="middle">plans feature A</text>
+
+            <rect x="10" y="98" width="150" height="44" rx="9" fill="#1c2330" stroke="#7c93ff" stroke-width="1.5"/>
+            <text x="85" y="118" fill="#e6edf3" font-size="13" text-anchor="middle">Orchestrator B</text>
+            <text x="85" y="134" fill="#9aa7b6" font-size="10.5" text-anchor="middle">plans feature B</text>
+
+            <rect x="10" y="176" width="150" height="44" rx="9" fill="#1c2330" stroke="#7c93ff" stroke-width="1.5"/>
+            <text x="85" y="196" fill="#e6edf3" font-size="13" text-anchor="middle">Orchestrator C</text>
+            <text x="85" y="212" fill="#9aa7b6" font-size="10.5" text-anchor="middle">plans project C</text>
+          </g>
+          <!-- arrows to scheduler -->
+          <g stroke="#3a4556" stroke-width="1.5" fill="none">
+            <path d="M160 42 C 220 42, 220 110, 290 110" marker-end="url(#ar)"/>
+            <path d="M160 120 C 230 120, 230 118, 290 118" marker-end="url(#ar)"/>
+            <path d="M160 198 C 220 198, 220 126, 290 126" marker-end="url(#ar)"/>
+          </g>
+          <text x="225" y="78" fill="#6b7888" font-size="10" text-anchor="middle">submit DAG nodes</text>
+          <!-- scheduler -->
+          <rect x="292" y="84" width="160" height="72" rx="11" fill="#191428" stroke="#c98bff" stroke-width="2"/>
+          <text x="372" y="112" fill="#e6edf3" font-size="14" font-weight="600" text-anchor="middle">ONE Scheduler</text>
+          <text x="372" y="130" fill="#c98bff" font-size="10.5" text-anchor="middle">shared API lease</text>
+          <text x="372" y="144" fill="#c98bff" font-size="10.5" text-anchor="middle">shared cost budget</text>
+          <!-- to execution -->
+          <path d="M452 120 L 510 120" stroke="#3a4556" stroke-width="1.5" marker-end="url(#ar)"/>
+          <rect x="512" y="92" width="118" height="56" rx="9" fill="#1c2330" stroke="#4cc38a" stroke-width="1.5"/>
+          <text x="571" y="116" fill="#e6edf3" font-size="12" text-anchor="middle">worker ⇅ tester</text>
+          <text x="571" y="132" fill="#9aa7b6" font-size="11" text-anchor="middle">→ reviewer</text>
+          <defs>
+            <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3a4556"/></marker>
+          </defs>
+        </svg>
+        <p style="color:var(--muted);font-size:13.5px;margin:6px 0 0">The scheduler you build for one project is the same one that serves many — it just accepts work from several planners and interleaves all nodes under a single budget.</p>
+      </div>
+    </section>
+
+    <!-- ROLES -->
+    <section id="roles">
+      <h2>The four roles</h2>
+      <p class="lead">Each role already exists in pieces — Phase 5 arranges them into a hierarchy. The worker⇅tester⇅reviewer leaf <em>is</em> today's <code>generate.py</code> loop.</p>
+
+      <div class="panel">
+        <div class="stack">
+          <div class="node plan"><div class="r c-plan">Orchestrator / Planner</div><div class="d">Decompose a feature/project into a DAG of module nodes · one per feature</div></div>
+          <div class="conn"></div><div class="conn-label">dispatches</div>
+          <div class="node work"><div class="r c-work">Worker (coder)</div><div class="d">Generate one module from its spec + dependencies' real interfaces</div></div>
+          <div class="conn loop"></div>
+          <div class="node test"><div class="r c-test">Tester</div><div class="d">Write &amp; run tests, iterate with the worker until green</div></div>
+          <div class="conn"></div><div class="conn-label">hands finished module to</div>
+          <div class="node review"><div class="r c-review">Reviewer</div><div class="d">Independent final gate — reads the <em>original spec</em>, blocks on drift</div></div>
+        </div>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--plan)"></i> new in Phase 5</span>
+          <span><i class="dot" style="background:var(--work)"></i> ollama_generate / raw-Claude</span>
+          <span><i class="dot" style="background:var(--test)"></i> _run_tests + ollama-tester</span>
+          <span><i class="dot" style="background:var(--review)"></i> claude_review (review.py)</span>
+        </div>
+      </div>
+
+      <div class="call key">
+        <div class="h">Why the reviewer can't be dropped</div>
+        In Phase 3 the tests were <b>hand-written ground truth</b>. In Phase 5 the tester <em>generates</em> the tests and the worker <em>generates</em> the code, and they loop. Two self-generated artifacts can converge on <b>green tests that encode the same misreading of the spec</b>. The reviewer — which sees the original spec, not the generated tests — is what makes self-generated tests trustworthy. It stays a hard gate.
+      </div>
+    </section>
+
+    <!-- SCHEDULER -->
+    <section id="scheduler">
+      <h2>The scheduler: a bounded-concurrency DAG executor</h2>
+      <p class="lead">Batch mode and multi-file mode are the same mechanism — one is just a DAG with no edges.</p>
+      <pre class="flow">build DAG from each planner's nodes → compute in-degrees
+ready_set = nodes with in-degree 0
+worker pool <span style="color:#6b7888">(size = API concurrency bound)</span>:
+    acquire <b>API lease</b> → run node → release lease
+    on success:
+        store node result <span style="color:#6b7888">(incl. its public interface)</span>
+        decrement in-degree of dependents
+        newly-zero nodes → ready_set
+    on hard failure:
+        apply <b>failure policy</b>  <span style="color:#6b7888">(pluggable — see Open decisions)</span>
+repeat until DAG drained</pre>
+      <div class="grid2">
+        <div class="leasecard"><h4 class="c-work">Batch case</h4><div class="b">"Multiple independent specs" = a DAG with <b>no edges</b>. Every node ready at once → all pipeline up to the bound.</div></div>
+        <div class="leasecard"><h4 class="c-plan">Multi-file case</h4><div class="b">Same scheduler with dependency edges. Modules generate in topological order; dependents wait for their inputs.</div></div>
+      </div>
+    </section>
+
+    <!-- LEASES -->
+    <section id="leases">
+      <h2>Concurrency control — two leases, not one</h2>
+      <div class="grid2">
+        <div class="leasecard">
+          <h4 class="c-sched">API lease</h4>
+          <div class="b">Bound = API rate limit (RPM <b>and</b> TPM). Acquired by <em>every</em> Claude call — generation and review alike. Must be <b>token-aware</b>: a burst of large-context reviews can blow TPM at low request concurrency. <b>Retry-on-429 with backoff lives inside the lease</b>, so a rate-limit hit pauses one worker without crashing the DAG.</div>
+        </div>
+        <div class="leasecard">
+          <h4 class="c-test">GPU lease</h4>
+          <div class="b">Bound = <b>1</b> for the 14b model — only relevant if an Ollama node exists. On one 4080, two coder jobs don't run faster in parallel; they thrash VRAM. Demoted to niche: Ollama is not the dominant Phase 5 path.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SUBSTRATE -->
+    <section id="substrate">
+      <h2>Execution substrate</h2>
+      <p class="lead">What actually runs a node — a direct async API call, or a spawned Claude Code agent?</p>
+      <div class="call rec">
+        <div class="h">✓ Recommendation</div>
+        <b>Python scheduler spine + pluggable executors.</b> Default every node to a direct async Anthropic API call; escalate to a spawned Claude Code agent only for reasoning-heavy nodes (the planner, occasionally a gnarly worker).
+      </div>
+      <p>Why <em>not</em> make nested Claude Code agents the backbone: each spawned agent starts cold, re-derives context, and — critically — has <b>no global view of the shared rate-limit / cost budget</b>, the exact resource Phase 5 is constrained by. The agent layer is excellent for individual judgment-heavy steps but a poor <em>scheduler</em>: it can't enforce a global ceiling.</p>
+      <div class="call key">
+        <div class="h">The principle</div>
+        Python owns scheduling and the budget. Agents / API calls are the muscle. The API-vs-agent choice is made <b>per node</b>, not globally — upgrade just the planner where the extra reasoning pays for itself.
+      </div>
+    </section>
+
+    <!-- HAZARDS -->
+    <section id="hazards">
+      <h2>Shared-state hazards — the real implementation work</h2>
+      <p class="lead">Latent in today's serial code; they break the moment execution goes concurrent.</p>
+      <table>
+        <tr><th>Hazard</th><th>Location</th><th>Fix</th></tr>
+        <tr><td>Tests run in a shared cwd / output path — concurrent pytest collides</td><td><code>generate.py</code> · <code>_run_tests</code></td><td>Per-node sandbox dir + distinct output path</td></tr>
+        <tr><td>Cost log is read-modify-write on one JSON file — writers clobber</td><td><code>cost.py</code> · <code>log_run</code></td><td>Single writer task draining a queue, or append-only JSONL + lock</td></tr>
+        <tr><td>A dependent worker hallucinates its dependency's interface</td><td><span class="pill">new</span> cross-node</td><td><b>Result store</b>: each finished node publishes its real public interface; dependents' prompts built from <code>spec + deps' interfaces</code></td></tr>
+        <tr><td>No global cost ceiling</td><td><span class="pill">new</span> scheduler</td><td>Budget tracked in the scheduler; queue/refuse new nodes past the ceiling</td></tr>
+      </table>
+      <div class="call key">
+        <div class="h">Most valuable contract</div>
+        The <b>result store</b> is what prevents integration drift across modules — it matters more than raw speed. Coordination across agents is mostly "what flows along the dependency edges."
+      </div>
+    </section>
+
+    <!-- OPEN -->
+    <section id="open">
+      <h2>Open decisions</h2>
+      <table>
+        <tr><th>Decision</th><th>Options</th><th>Default leaning</th></tr>
+        <tr><td>Failure policy</td><td>(a) skip failed node's subtree, finish independent branches; (b) fail-fast, halt the DAG</td><td>Pluggable hook; pick default at build time <span class="pill">parked</span></td></tr>
+        <tr><td>Planner upgrade</td><td>API-call planner vs spawned-agent planner</td><td>Start API-call; upgrade per-node if reasoning falls short</td></tr>
+        <tr><td>GPU concurrency</td><td>serialize all Ollama; or per-model leases (14b + 3b co-resident)</td><td>Ignore for now — Ollama not dominant</td></tr>
+      </table>
+    </section>
+
+    <!-- ROADMAP -->
+    <section id="roadmap">
+      <h2>Where this sits</h2>
+      <div class="panel">
+        <div class="timeline">
+          <div class="ph done"><div class="rail"><div class="ball"></div><div class="line"></div></div><div class="body"><span class="st">Complete</span><h4>Phase 0–2 · Infra, subagents, benchmarks</h4><p>Ollama on WSL2/GPU, four Claude Code subagents, three benchmark apps with hand-written test suites.</p></div></div>
+          <div class="ph done"><div class="rail"><div class="ball"></div><div class="line"></div></div><div class="body"><span class="st">Complete</span><h4>Phase 3 · Orchestrator</h4><p>Serial generate→test→review→retry loop. Break-even cost model (~100 lines / 1,225 tokens).</p></div></div>
+          <div class="ph done"><div class="rail"><div class="ball"></div><div class="line"></div></div><div class="body"><span class="st">Complete</span><h4>Phase 4 · Cross-repo integration</h4><p>Installable <code>aitk</code> CLI, spec convention, reusable GitHub Actions workflow.</p></div></div>
+          <div class="ph next"><div class="rail"><div class="ball"></div></div><div class="body"><span class="st">Design — this document</span><h4>Phase 5 · Parallel orchestration</h4><p>Many planners, one scheduler. Worker⇅tester⇅reviewer leaf nodes. DAG with cross-node interface passing under a shared API budget.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      internal-ai-toolkit · Phase 5 design · companion to <a href="design-parallel-orchestration.md">design-parallel-orchestration.md</a> and <a href="roadmap.md">roadmap.md</a>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

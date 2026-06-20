@@ -13,6 +13,7 @@ This document tracks what's been done, what's in progress, and what comes next. 
 | 2 — Benchmarks | ✅ Complete | Three test apps, scoring rubric, Phase 1 and Phase 3 results |
 | 3 — Orchestrator | ✅ Complete | Python orchestrator, Claude review loop, routing analysis |
 | 4 — Cross-Repo Integration | ✅ Complete | Installable CLI, spec convention, GitHub Actions reusable workflow |
+| 5 — Parallel Orchestration | 📐 Design | Many planners, one scheduler; worker→tester→reviewer DAG under a shared API budget |
 
 ---
 
@@ -176,10 +177,35 @@ A second repo (not this one) can run `aitk generate --spec SPEC.md --out module.
 
 ---
 
+## Phase 5 — Parallel Orchestration 📐
+
+**Goal:** Promote the serial single-file generate loop into a hierarchy — multiple planning
+orchestrators dispatching worker→tester→reviewer pipelines, coordinated by **one** scheduler
+under a single shared API rate-limit and cost budget.
+
+**Status:** Design agreed; not yet implemented.
+
+**Full design → [design-parallel-orchestration.md](design-parallel-orchestration.md)**
+(visual version: [design.html](design.html))
+
+Key decisions captured in the design doc:
+- **Many planners, one scheduler.** "Multiple orchestrators" is a planning concept; execution
+  is centralized so the global API/cost budget is enforced in one place.
+- **The bottleneck moved** from the GPU (Phase 3) to the Claude rate limit + cost budget, since
+  the dominant path is now Claude API calls rather than Ollama.
+- **Python scheduler spine + pluggable executors** — direct API calls by default, spawned Claude
+  Code agents only for reasoning-heavy nodes.
+- **Result store** carries each finished module's real interface to its dependents — the
+  coordination contract that prevents integration drift (absorbs the old "multi-file projects"
+  item below).
+
+This phase absorbs the former "Multi-file projects" and "Dynamic model routing" considerations —
+both are now scoped inside the parallel-orchestration design (per-node routing; DAG of modules).
+
+---
+
 ## Future Considerations
 
-- **Multi-file projects:** Current benchmarks are single-file. A larger benchmark (e.g. a full microservice with multiple modules) would stress-test context management and the spec convention.
 - **Model upgrades:** As better models land on Ollama, re-run benchmarks to see if quality improves without touching the orchestration layer.
-- **Cost dashboard:** Aggregate Claude token logs across all runs and repos into a single view. The `~/.claude/scripts/agent_token_stats.json` file is already tracking Ollama stats — add a Claude cost log in the same format.
+- **Cost dashboard:** Aggregate Claude token logs across all runs and repos into a single view. The `~/.claude/scripts/agent_token_stats.json` file is already tracking Ollama stats — add a Claude cost log in the same format. (Phase 5's single-writer cost log is a prerequisite.)
 - **Notification delivery:** Actually POST to a Slack/Discord webhook when a generation run completes, instead of just generating the message text.
-- **Dynamic model routing:** Beyond Ollama vs Claude, route between Ollama models based on task type — `qwen2.5-coder:14b` for code, `llama3.2:3b` for notifications, `llama3.1:8b` for CI config.
