@@ -232,7 +232,7 @@ follow-up discussion.
 |------|----------|------------|-------------|
 | A | **Test-trust model** | The **planner emits explicit acceptance criteria per node**. Generated tests must cover them; the reviewer receives the acceptance criteria as ground truth. | `acceptance_criteria` becomes a first-class field on every node spec. This is the anti-collusion anchor — tests and code are no longer the only sources of truth. |
 | B | **Human-in-the-loop** | **Review after the plan is emitted**, before any worker spends tokens. Approval gate sits between planner and scheduler dispatch. | Splits the flow into **plan → review → build**. Because node specs are on disk (item C), the human can *edit* them during review, not just approve/reject. |
-| C | **Per-node specs** | **Written to disk.** Main spec is human-co-authored; each node spec is an **expanded slice of the main spec** containing everything that node needs before writing — its portion of the main spec plus extra detail, its `acceptance_criteria`, `depends_on`, and (at build time) its dependencies' extracted interfaces. | Planner does decomposition **and** expansion. Proposed layout (confirm): `\.aitk/plans/<feature>/<node-id>.md`, one spec file per node, reusing the existing spec frontmatter convention. Reviewable + editable artifact. |
+| C | **Per-node specs** | **Written to disk.** Main spec is human-co-authored; each node spec is an **expanded slice of the main spec** containing everything that node needs before writing — its portion of the main spec plus extra detail, its `acceptance_criteria`, `depends_on`, and (at build time) its dependencies' extracted interfaces. | Planner does decomposition **and** expansion. Proposed layout: `\.aitk/plans/<feature>/<node-id>.md`, one spec file per node, reusing the existing spec frontmatter convention. Reviewable + editable artifact. |
 | D | **Single vs multi repo** | **Both.** Guiding constraint: concurrent planners/nodes should work on **unrelated things** to avoid interfering. | Adds a coordination requirement beyond DAG edges (see below). |
 
 ### Derived points these answers create
@@ -240,6 +240,62 @@ follow-up discussion.
 - **Acceptance-criteria coverage** (from A): something must check that the generated tests actually exercise the criteria — assigned to the **reviewer**, which already sees the original spec; it now also sees the per-node acceptance criteria and flags uncovered ones. *(Open: whether to add a cheaper pre-reviewer coverage check — deferred.)*
 - **Plan approval mechanics** (from B): approval is **per-feature-plan (whole DAG)**, with on-disk node specs editable before build. The CLI surface therefore needs a distinct `plan` step that halts for review and a `build` step that consumes the approved plan.
 - **Write-scope conflict avoidance** (from D): two nodes with *no dependency edge* can still collide if they write overlapping files. Since nodes are multi-file (round-1 #6), **each node declares its output file set, and the scheduler/broker serializes any two nodes whose output scopes overlap** — a path-keyed write lock layered on top of the DAG. "Unrelated work" is enforced, not just hoped for. Mechanism detail TBD.
+
+---
+
+## 6d. Mechanism decisions (resolves the §6c TBDs)
+
+**Node-spec location — confirmed:** `.aitk/plans/<feature>/<node-id>.md`, one spec file per
+node, reusing the existing spec frontmatter convention. Reviewable and editable during the
+plan-approval gate (round-2 B).
+
+### Write-scope lock — broker-held, atomic, path-keyed
+
+The write-scope lock lives in the **broker**, not the in-process scheduler. The broker is
+already the cross-process authority for the dollar budget (round-1 #1); write-scope
+collisions are the *same* cross-process problem (two separately-launched orchestrators
+touching the same files), so one authority owns both.
+
+- **Declared scope:** each node declares `output_scope` (concrete file paths and/or directory
+  prefixes) in its node spec. The planner aims to make scopes **disjoint by construction**
+  ("unrelated work", round-2 D); the lock is the **safety net** for collisions it can't see
+  across features/repos.
+- **Atomic whole-scope acquisition:** before running, a node requests a write-lease over its
+  *entire* scope in one broker call. Granted only if no overlapping path/prefix is currently
+  leased; otherwise the node waits. Acquiring the whole scope atomically eliminates
+  hold-and-wait → **deadlock-free**.
+- **Overlap rule:** two scopes conflict if any concrete path in one is equal-to or
+  prefix-of a path in the other. File-level locks where paths are enumerable; prefix locks
+  for directory scopes. Fine-grained to preserve concurrency.
+- **Composes with the DAG:** dependency edges already serialize A→B, so by the time B runs,
+  A's lease is released — a shared file between a node and its declared dependency is fine.
+  The lock only adds serialization between nodes with *no* edge.
+- **Robustness:** leases are tied to a run id with a **TTL / heartbeat** so a crashed
+  orchestrator cannot hold a lock (or budget) forever.
+
+### Acceptance-criteria coverage — layered, cheap-then-smart
+
+Mirrors the design's standing philosophy (deterministic check first, LLM only for judgment —
+same shape as the planner's context-gatherer→API-call, §6a):
+
+1. **Planner emits criteria with stable ids** (`AC-1`, `AC-2`, …) per node.
+2. **Tester tags each generated test** with the criterion id(s) it targets — pytest marker
+   or naming convention; a parallel convention for non-Python runners (gtest etc.).
+3. **Deterministic coverage check (no LLM):** parse the tests, compare referenced ids vs the
+   full criteria set. Any criterion with zero tests **fails fast and loops back to the
+   tester** to regenerate — no Claude call spent. Bounded by the loop cap (round-1 #2).
+4. **Reviewer judges adequacy:** tagging proves a test *claims* `AC-1`, not that it is a
+   *good* test. The reviewer receives the criteria + the coverage map and flags weak coverage.
+
+**Division of labour:** step 3 catches **missing** coverage for free; step 4 catches **weak**
+coverage. For `gated` / non-automatable nodes (round-1 #2) there are no tests, so step 3 is
+skipped and coverage falls entirely to the reviewer / human gate against the criteria.
+
+### Accumulating node-spec schema
+
+These decisions add fields to the per-node spec (to be formalized in `docs/spec-format.md`
+as a Plan task): `output_scope`, `acceptance_criteria` (with ids), `validation_kind`
+(`automated` | `gated`), `depends_on`, plus the existing `framework` / `test_command`.
 
 ---
 
