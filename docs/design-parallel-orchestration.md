@@ -226,6 +226,23 @@ follow-up discussion.
 
 ---
 
+## 6c. Decision log — vision round 2 (locked)
+
+| Item | Decision | Resolution | Implication |
+|------|----------|------------|-------------|
+| A | **Test-trust model** | The **planner emits explicit acceptance criteria per node**. Generated tests must cover them; the reviewer receives the acceptance criteria as ground truth. | `acceptance_criteria` becomes a first-class field on every node spec. This is the anti-collusion anchor — tests and code are no longer the only sources of truth. |
+| B | **Human-in-the-loop** | **Review after the plan is emitted**, before any worker spends tokens. Approval gate sits between planner and scheduler dispatch. | Splits the flow into **plan → review → build**. Because node specs are on disk (item C), the human can *edit* them during review, not just approve/reject. |
+| C | **Per-node specs** | **Written to disk.** Main spec is human-co-authored; each node spec is an **expanded slice of the main spec** containing everything that node needs before writing — its portion of the main spec plus extra detail, its `acceptance_criteria`, `depends_on`, and (at build time) its dependencies' extracted interfaces. | Planner does decomposition **and** expansion. Proposed layout (confirm): `\.aitk/plans/<feature>/<node-id>.md`, one spec file per node, reusing the existing spec frontmatter convention. Reviewable + editable artifact. |
+| D | **Single vs multi repo** | **Both.** Guiding constraint: concurrent planners/nodes should work on **unrelated things** to avoid interfering. | Adds a coordination requirement beyond DAG edges (see below). |
+
+### Derived points these answers create
+
+- **Acceptance-criteria coverage** (from A): something must check that the generated tests actually exercise the criteria — assigned to the **reviewer**, which already sees the original spec; it now also sees the per-node acceptance criteria and flags uncovered ones. *(Open: whether to add a cheaper pre-reviewer coverage check — deferred.)*
+- **Plan approval mechanics** (from B): approval is **per-feature-plan (whole DAG)**, with on-disk node specs editable before build. The CLI surface therefore needs a distinct `plan` step that halts for review and a `build` step that consumes the approved plan.
+- **Write-scope conflict avoidance** (from D): two nodes with *no dependency edge* can still collide if they write overlapping files. Since nodes are multi-file (round-1 #6), **each node declares its output file set, and the scheduler/broker serializes any two nodes whose output scopes overlap** — a path-keyed write lock layered on top of the DAG. "Unrelated work" is enforced, not just hoped for. Mechanism detail TBD.
+
+---
+
 ## 7. Open decisions (resolve during implementation)
 
 | Decision | Options | Default leaning |
