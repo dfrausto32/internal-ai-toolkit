@@ -209,6 +209,23 @@ collected.
 
 ---
 
+## 6b. Decision log — vision round 1 (locked)
+
+These six are settled. Items still open (test-trust model, human-in-the-loop, where
+per-node specs live, single-repo vs multi-repo) are tracked in §7 and being resolved over
+follow-up discussion.
+
+| # | Decision | Resolution | Implication |
+|---|----------|------------|-------------|
+| 1 | **Scheduler process model** | **Lightweight shared broker** — a persistent token-bucket + cost ledger that independent `aitk` processes coordinate through (not one monolithic process, not per-invocation budgets). | Preserves the global ceiling across separately-launched orchestrators. The broker is the one piece that must be a durable shared service (socket/file-backed). |
+| 2 | **Worker⇅tester loop** | Tests authored **up front** per spec iteration. **But** the test-execution step is **pluggable per node**, not hardcoded pytest — it must support non-Python frameworks (gtest, language-specific runners) via the spec's `test_command`, and provide an explicit **escape path for validation that can't be fully automated** (hardware-in-the-loop, simulation, real-instance dependencies). Those nodes fall back to a non-test gate (reviewer / human) rather than blocking the loop forever. | Promotes `test_command` from informational (today) to executed. Adds a "validation kind" per node: `automated` vs `gated`. The loop's green-signal is "test command passed" *or* "gate satisfied". |
+| 3 | **Per-role model** | **Per-role config** — planner / worker / tester / reviewer each get their own configurable model (cost-vs-capability per role). | Replaces today's hardcoded model choices. Config surface, not code change, to retune. |
+| 4 | **Budget unit** | **Dollars** is the real ceiling. Broker throttles/limits on cumulative spend, converting tokens→dollars via the per-model rate table (rates already in `cost.py`). | Token-aware lease becomes dollar-aware: every call estimates cost, broker refuses/queues past the $ cap. Needs a per-model pricing table keyed by the role models from #3. |
+| 5 | **Result-store interface** | **Signatures + docstrings** (AST-extracted), not full source. | Cheap dependent-input cost; the result store extracts public signatures + one-line docstrings from a finished node's files. |
+| 6 | **Node granularity** | **Multi-file nodes** allowed — a node maps to a set of output files + its tests, not a single file. | `generate.py`'s single-file assumption must be generalized. Sandboxing is per-node *directory*; interface extraction (#5) spans all of a node's files. |
+
+---
+
 ## 7. Open decisions (resolve during implementation)
 
 | Decision | Options | Default leaning |
