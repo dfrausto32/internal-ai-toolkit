@@ -15,6 +15,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install package
-        run: pip install -e .
+        run: pip install -e ".[test]"
       - name: Run unit tests
         run: pytest src/aitk/tests/ -q
