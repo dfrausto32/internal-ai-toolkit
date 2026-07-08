@@ -1,12 +1,12 @@
-"""Tests for aitk.routing — Ollama vs Claude break-even decision."""
+"""Tests for aitk.routing — route resolution and the local break-even heuristic."""
 import pytest
 
+from aitk.config import claude_cost
 from aitk.routing import (
     BREAK_EVEN_TOKENS,
-    cost_phase3,
-    cost_raw_claude,
     decide_route,
     estimate_output_tokens,
+    resolve_route,
 )
 
 
@@ -49,27 +49,30 @@ def test_decide_route_boundary_is_inclusive_of_ollama():
     assert decide_route("spec", estimated_lines=lines) == "ollama"
 
 
-def test_cost_phase3_charges_input_at_3_and_output_at_15_per_million():
-    cost = cost_phase3(review_input=1_000_000, review_output=1_000_000)
+def test_resolve_route_auto_is_claude_when_local_models_disabled(monkeypatch):
+    monkeypatch.delenv("AITK_OLLAMA_ENABLED", raising=False)
+    # Even a spec far above the break-even must not route to an Ollama server
+    # that isn't there.
+    assert resolve_route("auto", "spec", estimated_lines=500) == "claude"
+
+
+def test_resolve_route_auto_uses_break_even_when_local_models_enabled(monkeypatch):
+    monkeypatch.setenv("AITK_OLLAMA_ENABLED", "1")
+    assert resolve_route("auto", "spec", estimated_lines=500) == "ollama"
+    assert resolve_route("auto", "spec", estimated_lines=50) == "claude"
+
+
+@pytest.mark.parametrize("explicit", ["ollama", "claude"])
+def test_resolve_route_passes_explicit_routes_through(monkeypatch, explicit):
+    monkeypatch.delenv("AITK_OLLAMA_ENABLED", raising=False)
+    assert resolve_route(explicit, "spec", estimated_lines=500) == explicit
+
+
+def test_claude_cost_sonnet_charges_3_in_and_15_out_per_million():
+    cost = claude_cost("claude-sonnet-4-6", 1_000_000, 1_000_000)
     assert cost == pytest.approx(3.00 + 15.00)
 
 
-def test_cost_raw_claude_charges_spec_as_input_and_code_as_output():
-    cost = cost_raw_claude(spec_input=1_000_000, code_output=1_000_000)
-    assert cost == pytest.approx(3.00 + 15.00)
-
-
-def test_cost_raw_claude_is_cheaper_than_phase3_below_break_even():
-    # Small file: raw Claude generation should win (per the derivation in routing.py's docstring)
-    spec_input, code_output = 500, 600          # ~50-line file
-    review_input, review_output = 1_500 + code_output, 800
-
-    assert cost_raw_claude(spec_input, code_output) < cost_phase3(review_input, review_output)
-
-
-def test_phase3_is_cheaper_than_raw_claude_above_break_even():
-    # Large file: Ollama + Claude review should win
-    spec_input, code_output = 500, 3_000         # ~250-line file
-    review_input, review_output = 1_500 + code_output, 800
-
-    assert cost_phase3(review_input, review_output) < cost_raw_claude(spec_input, code_output)
+def test_claude_cost_haiku_charges_1_in_and_5_out_per_million():
+    cost = claude_cost("claude-haiku-4-5", 1_000_000, 1_000_000)
+    assert cost == pytest.approx(1.00 + 5.00)

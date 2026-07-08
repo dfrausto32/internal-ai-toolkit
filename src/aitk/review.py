@@ -4,7 +4,7 @@ import os
 
 import anthropic
 
-MODEL = "claude-sonnet-4-6"
+from aitk.config import REVIEW_MODEL
 
 _SYSTEM = (
     "You are a senior Python engineer reviewing AI-generated code against a spec. "
@@ -66,7 +66,7 @@ def claude_review(spec: str, code: str, test_output: str, installed_versions: st
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model=MODEL,
+        model=REVIEW_MODEL,
         max_tokens=2048,
         system=_SYSTEM,
         messages=[{"role": "user", "content": _TEMPLATE.format(
@@ -81,7 +81,17 @@ def claude_review(spec: str, code: str, test_output: str, installed_versions: st
     if raw.endswith("```"):
         raw = raw[: raw.rfind("```")].rstrip()
 
-    result = json.loads(raw)
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        # A malformed review must not crash a run we've already paid for —
+        # degrade to a non-blocking "review unavailable" result instead.
+        result = {
+            "passed": False,
+            "issues": [],
+            "scores": {},
+            "summary": f"Review skipped: model response was not valid JSON ({raw[:120]!r})",
+        }
     result["_usage"] = {
         "input_tokens": message.usage.input_tokens,
         "output_tokens": message.usage.output_tokens,

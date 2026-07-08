@@ -4,7 +4,7 @@ import time
 
 import httpx
 
-OLLAMA_URL = "http://localhost:11434"
+from aitk.config import OLLAMA_MODEL, OLLAMA_URL
 
 _BASE_RULES = (
     "You are an expert software developer. Write production-quality, well-structured Python code. "
@@ -99,7 +99,7 @@ def _strip_fences(text: str) -> str:
 async def ollama_generate(
     user_prompt: str,
     frameworks: list[str] | None = None,
-    model: str = "qwen2.5-coder:14b",
+    model: str = OLLAMA_MODEL,
     url: str = OLLAMA_URL,
 ) -> tuple[str, dict]:
     """Call Ollama /api/generate (streaming), return (code_text, stats_dict)."""

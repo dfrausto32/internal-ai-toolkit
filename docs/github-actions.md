@@ -55,14 +55,9 @@ Add `ANTHROPIC_API_KEY` to your repo's **Settings → Secrets and variables → 
 
 ## Routing in CI
 
-The `auto` route works in CI but note:
-
-- **`route: auto` with `estimated_lines` set** — accurate, uses the spec frontmatter
-- **`route: auto` without `estimated_lines`** — uses a word-count heuristic (less accurate)
-- **`route: ollama`** — the workflow installs Ollama on the runner and pulls the model (~2–3 min cold start)
-- **`route: claude`** — no Ollama setup, faster CI, slightly higher cost for large files
-
-For CI pipelines where build time matters more than cost, `route: claude` is often the right default. For nightly generation jobs where cost matters, use `route: auto` or `route: ollama` with `estimated_lines` set in the spec.
+- **`route: auto`** — resolves to `claude` in CI: local models are gated behind `AITK_OLLAMA_ENABLED=1`, which is never set on hosted runners. This is the recommended default.
+- **`route: claude`** — same result, stated explicitly.
+- **`route: ollama`** — the workflow installs Ollama and pulls the model, but hosted runners are CPU-only: a 14B model means a ~9 GB pull plus inference measured in minutes per kilotoken. Use this only on a self-hosted runner with a GPU (and set `AITK_OLLAMA_ENABLED=1` there if you want `auto` to consider it).
 
 ---
 
