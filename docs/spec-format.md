@@ -91,3 +91,43 @@ One file: `src/parser.py`
 
 Raise `ValueError` with the field name if validation fails.
 ```
+
+---
+
+## Node specs (Phase 5)
+
+A **node spec** describes one node in a plan's DAG (see
+[design-parallel-orchestration.md](design-parallel-orchestration.md)). The planner writes one
+per node to `.aitk/plans/<feature>/<node-id>.md`; the body is an expanded slice of the main spec
+with everything that node needs before writing. It reuses the frontmatter convention above plus
+these fields (parsed by `aitk.plan.parse_node_spec`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | **Required.** Unique node id within the plan. |
+| `depends_on` | list | Node ids this node depends on. Must resolve; must not form a cycle. |
+| `output_scope` | list | Files / directory prefixes this node writes. Used to serialize nodes with overlapping scopes. |
+| `acceptance_criteria` | list | Plain strings or `{id, text}` mappings. Strings get positional ids (`AC-1`…). Ids must be unique. |
+| `validation_kind` | string | `automated` (tests run) or `gated` (no automated test — reviewer/human gate). |
+| `test_command` | string | Executed for `automated` nodes (promoted from informational). |
+
+```markdown
+---
+id: api-layer
+depends_on: [models]
+output_scope: [src/api/, src/api.py]
+validation_kind: automated
+test_command: pytest tests/api -q
+acceptance_criteria:
+  - id: AC-1
+    text: GET /items returns 200 with a list
+  - POST /items validates the body and returns 201
+---
+# Node: API layer
+...expanded prose for this node...
+```
+
+`validate_plan()` checks the whole set: unique ids, resolvable `depends_on`, no cycles, valid
+`validation_kind`, unique criterion ids. `find_scope_conflicts()` reports overlapping
+`output_scope`s for the scheduler's write-lease layer.
+
