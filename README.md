@@ -1,6 +1,6 @@
 # internal-ai-toolkit
 
-A cost-optimized AI development pipeline. Local Ollama models handle code generation (free, fast, private). Claude handles review and quality verification. The `aitk` CLI wires them together and routes each job to whichever backend is cheaper.
+A cost-optimized AI development pipeline. Claude Sonnet generates code from a spec, Claude Haiku reviews it against the spec and test results, and the pipeline retries once on blocking errors. When local-model hardware is available (`AITK_OLLAMA_ENABLED=1`), Ollama takes over generation for large jobs — free, fast, private — with the same Claude review layer on top. The `aitk` CLI wires it all together, including drafting the spec itself.
 
 ---
 
@@ -20,9 +20,19 @@ pip install -e /path/to/internal-ai-toolkit
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 3. Write a spec
+### 3. Write a spec — or have Claude draft it
 
-Add a `SPEC.md` to your project describing what to generate. Include a frontmatter block so the router knows what it's working with:
+Let Claude turn a plain-English description into a complete, routable spec:
+
+```bash
+aitk spec init --describe "A rate limiter with sliding-window and token-bucket strategies" --out SPEC.md
+# or pipe a longer description:
+cat idea.md | aitk spec init --out SPEC.md
+```
+
+The draft includes the frontmatter the router needs (`frameworks`, `estimated_lines`, `test_command`) and a body structured for one-pass generation (public interface, behavior, edge cases, out-of-scope). Review and edit it before generating.
+
+Or write `SPEC.md` by hand. Include a frontmatter block so the router knows what it's working with:
 
 ```markdown
 ---
@@ -53,11 +63,11 @@ aitk generate --spec SPEC.md --out src/module.py --tests tests/
 ```
 
 `aitk` will:
-1. Route the job (Ollama or Claude, based on spec size)
-2. Generate the code
+1. Route the job (Claude by default; Ollama for large specs when `AITK_OLLAMA_ENABLED=1`)
+2. Generate the code (Claude Sonnet, or local Ollama)
 3. Run your test suite
-4. Send the code + test output to Claude for review
-5. Retry once if Claude flags blocking errors
+4. Send the code + test output to Claude Haiku for review
+5. Retry once if the review flags blocking errors
 6. Log the run cost
 
 ### 6. Check cost history
@@ -88,34 +98,35 @@ See [docs/github-actions.md](docs/github-actions.md) for all inputs, outputs, an
 
 ## How routing works
 
-Every `aitk generate --route auto` call estimates the output size from the spec's `estimated_lines` field and compares it to the break-even threshold:
+`--route auto` resolves to **claude** unless local models are enabled (`AITK_OLLAMA_ENABLED=1` — off by default, since the current machine can't run them). With local models enabled, auto falls back to the size heuristic:
 
-| File size | Route | Reason |
-|-----------|-------|--------|
-| < ~100 lines | Raw Claude | Generation output is cheap; review overhead dominates |
-| > ~100 lines | Ollama + Claude review | Code tokens are 5× cheaper as review input ($3/1M) than as Claude output ($15/1M) |
+| Local models | File size | Route | Reason |
+|--------------|-----------|-------|--------|
+| disabled | any | Claude + Haiku review | No Ollama server to depend on |
+| enabled | < ~100 lines | Claude + Haiku review | Small jobs: Claude quality is cheap |
+| enabled | > ~100 lines | Ollama + Haiku review | Large jobs: local generation is free |
 
-Override with `--route ollama` or `--route claude` if needed.
+Override with `--route ollama` or `--route claude` if needed. Both routes get the same Haiku review + retry loop.
 
 ---
 
 ## How it works
 
 ```
-aitk generate
+aitk spec init ──► Claude drafts SPEC.md (frontmatter + buildable body)
+                        │
+aitk generate ◄─────────┘ (after human review)
     │
-    ├─ route=ollama ─► qwen2.5-coder:14b (local, free)
+    ├─ route=ollama ─► qwen2.5-coder:14b (local, free; needs AITK_OLLAMA_ENABLED=1)
     │                       │
-    │                  pytest tests/
-    │                       │
-    │                  Claude review ──► blocking errors? ──► retry once
-    │
     └─ route=claude ─► Claude Sonnet 4.6 (direct generation)
                             │
                        pytest tests/
+                            │
+                       Haiku review ──► blocking errors? ──► retry once
 ```
 
-Claude review catches: wrong imports, schema drift, missing guards, falsy integer checks, missing docstrings.
+The Haiku review catches: wrong imports, schema drift, missing guards, falsy integer checks, missing docstrings.
 
 ---
 
@@ -137,8 +148,10 @@ Claude review catches: wrong imports, schema drift, missing guards, falsy intege
 ```
 internal-ai-toolkit/
 ├── src/aitk/                    ← installable package (pip install -e .)
-│   ├── cli.py                   ← aitk generate / cost / route
+│   ├── cli.py                   ← aitk generate / cost / route / spec init
+│   ├── config.py                ← models, pricing, local-model availability
 │   ├── spec.py                  ← spec frontmatter parser
+│   ├── specgen.py               ← Claude-drafted SPEC.md (aitk spec init)
 │   ├── routing.py               ← Ollama vs Claude break-even logic
 │   ├── agents.py                ← async Ollama worker, dynamic system prompt
 │   ├── review.py                ← Claude review step
@@ -163,10 +176,9 @@ internal-ai-toolkit/
 
 ---
 
-## Hardware reference
+## Hardware reference (optional — local models only)
 
-Developed on Windows 11 + WSL2 (Ubuntu 22.04), NVIDIA RTX 4080 (16 GB VRAM), 32 GB RAM.
-Model selection is tuned for 16 GB VRAM. See [docs/ollama-setup.md](docs/ollama-setup.md) for other configs.
+No special hardware is needed for the default Claude-only pipeline. The local Ollama route requires a GPU with enough VRAM for the models below (originally developed against an RTX 4080, 16 GB VRAM); enable it with `AITK_OLLAMA_ENABLED=1`. See [docs/ollama-setup.md](docs/ollama-setup.md).
 
 ```bash
 ollama pull qwen2.5-coder:14b   # code generation (~9 GB VRAM)

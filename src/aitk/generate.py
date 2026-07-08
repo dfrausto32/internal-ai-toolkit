@@ -1,4 +1,9 @@
-"""Core generate loop: Ollama or Claude → test → Claude review → optional retry."""
+"""Core generate loop: (Ollama | Claude) generation → test → Claude review → optional retry.
+
+Both routes run the same pipeline — generate, run tests, Haiku review, retry once
+on blocking errors. They differ only in who writes the code: the free local
+Ollama worker, or a Claude generation call.
+"""
 import importlib.metadata
 import subprocess
 import sys
@@ -6,13 +11,20 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aitk.agents import ollama_generate
+import anthropic
+
+from aitk.agents import _strip_fences, ollama_generate
+from aitk.config import (
+    GENERATION_MODEL,
+    MAX_GENERATION_TOKENS,
+    REVIEW_MODEL,
+    claude_cost,
+    ollama_enabled,
+)
 from aitk.cost import log_run
 from aitk.review import claude_review
-from aitk.routing import cost_phase3, cost_raw_claude, decide_route
+from aitk.routing import BREAK_EVEN_TOKENS, estimate_output_tokens, resolve_route
 from aitk.spec import parse_spec
-
-import anthropic
 
 
 def _run_tests(test_dir: str) -> tuple[bool, str]:
@@ -65,9 +77,10 @@ def _coder_prompt(spec_body: str) -> str:
 
 
 def _retry_prompt(spec_body: str, prior_code: str, errors: list[dict]) -> str:
-    """Build a retry prompt that feeds Claude's error list back to Ollama."""
+    """Build a retry prompt that feeds the reviewer's error list back to the generator."""
     issue_lines = "\n".join(
-        f"- [{i['severity'].upper()}] {i['location']}: {i['description']}  FIX: {i['fix']}"
+        f"- [{i.get('severity', 'error').upper()}] {i.get('location', '?')}: "
+        f"{i.get('description', '')}  FIX: {i.get('fix', '')}"
         for i in errors
     )
     return (
@@ -80,169 +93,121 @@ def _retry_prompt(spec_body: str, prior_code: str, errors: list[dict]) -> str:
     )
 
 
-def _claude_direct_prompt(spec_body: str) -> str:
-    """Build a prompt for raw Claude generation (no Ollama)."""
-    return (
-        "Implement the following Python spec exactly as described. "
-        "Return ONLY raw Python code — no markdown fences, no explanation.\n\n"
-        f"{spec_body}"
-    )
-
-
-async def _generate_ollama(
-    spec_body: str,
-    frameworks: list[str],
-    model: str,
-    output_path: str,
-    test_dir: str,
-    verbose: bool,
-) -> dict:
-    """Full Ollama → test → Claude review → retry loop."""
-    iterations = []
-
-    # Iteration 1
-    if verbose:
-        print(f"[1/3] Generating with Ollama ({model})...", file=sys.stderr)
-    code, ollama_stats = await ollama_generate(
-        user_prompt=_coder_prompt(spec_body),
-        frameworks=frameworks,
-        model=model,
-    )
-    Path(output_path).write_text(code)
-    if verbose:
-        print(f"      {ollama_stats['response_tokens']} tokens  {ollama_stats['tokens_per_second']} tok/s  {ollama_stats['elapsed_s']}s", file=sys.stderr)
-
-    if verbose:
-        print("[2/3] Running tests...", file=sys.stderr)
-    passed, test_out = _run_tests(test_dir)
-    pass_count = test_out.count(" PASSED")
-    fail_count = test_out.count(" FAILED")
-    if verbose:
-        print(f"      {pass_count} passed  {fail_count} failed", file=sys.stderr)
-
-    if verbose:
-        print("[3/3] Claude review...", file=sys.stderr)
-    spec_for_review = Path(output_path).parent.parent / "SPEC.md"
-    full_spec = spec_for_review.read_text() if spec_for_review.exists() else spec_body
-    versions = _installed_versions(frameworks)
-    review = claude_review(full_spec, code, _condense_for_review(test_out), versions)
-    usage = review.pop("_usage")
-    if verbose:
-        print(f"      passed={review['passed']}  issues={len(review['issues'])}  tokens={usage['input_tokens']}in/{usage['output_tokens']}out", file=sys.stderr)
-
-    iterations.append({
-        "iteration": 1,
-        "ollama_stats": ollama_stats,
-        "pass_count": pass_count,
-        "fail_count": fail_count,
-        "review": review,
-        "claude_tokens": usage,
-    })
-
-    # Retry if Claude flagged blocking errors
-    blocking = [i for i in review.get("issues", []) if i["severity"] == "error"]
-    if blocking:
-        if verbose:
-            print(f"\n[retry] {len(blocking)} blocking issue(s). Regenerating...", file=sys.stderr)
-        code2, stats2 = await ollama_generate(
-            user_prompt=_retry_prompt(spec_body, code, blocking),
-            frameworks=frameworks,
-            model=model,
-        )
-        Path(output_path).write_text(code2)
-        if verbose:
-            print(f"        {stats2['response_tokens']} tokens  {stats2['elapsed_s']}s", file=sys.stderr)
-
-        passed2, test_out2 = _run_tests(test_dir)
-        pass_count2 = test_out2.count(" PASSED")
-        fail_count2 = test_out2.count(" FAILED")
-        if verbose:
-            print(f"        {pass_count2} passed  {fail_count2} failed", file=sys.stderr)
-
-        review2 = claude_review(full_spec, code2, _condense_for_review(test_out2), versions)
-        usage2 = review2.pop("_usage")
-        if verbose:
-            print(f"        passed={review2['passed']}  tokens={usage2['input_tokens']}in/{usage2['output_tokens']}out", file=sys.stderr)
-
-        iterations.append({
-            "iteration": 2,
-            "ollama_stats": stats2,
-            "pass_count": pass_count2,
-            "fail_count": fail_count2,
-            "review": review2,
-            "claude_tokens": usage2,
-        })
-
-    final = iterations[-1]
-    total_claude_in  = sum(it["claude_tokens"]["input_tokens"]  for it in iterations)
-    total_claude_out = sum(it["claude_tokens"]["output_tokens"] for it in iterations)
-    total_ollama_out = sum(it["ollama_stats"]["response_tokens"] for it in iterations)
-
-    return {
-        "route": "ollama",
-        "iterations": len(iterations),
-        "final_pass_count": final["pass_count"],
-        "final_fail_count": final["fail_count"],
-        "final_review": final["review"],
-        "claude_input_tokens": total_claude_in,
-        "claude_output_tokens": total_claude_out,
-        "ollama_response_tokens": total_ollama_out,
-        "estimated_cost_usd": round(cost_phase3(total_claude_in, total_claude_out), 5),
-        "all_iterations": iterations,
-    }
-
-
-async def _generate_claude(
-    spec_body: str,
-    output_path: str,
-    test_dir: str,
-    verbose: bool,
-) -> dict:
-    """Raw Claude generation — no Ollama, no review loop."""
+def _claude_generate(prompt: str) -> tuple[str, dict]:
+    """One Claude generation call, return (code_text, usage_dict)."""
     import os
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise EnvironmentError("ANTHROPIC_API_KEY is not set")
 
-    if verbose:
-        print("[1/2] Generating with Claude...", file=sys.stderr)
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": _claude_direct_prompt(spec_body)}],
+        model=GENERATION_MODEL,
+        max_tokens=MAX_GENERATION_TOKENS,
+        messages=[{"role": "user", "content": (
+            "Return ONLY raw Python code — no markdown fences, no explanation.\n\n" + prompt
+        )}],
     )
+    if message.stop_reason == "max_tokens":
+        raise RuntimeError(
+            f"Claude generation hit the {MAX_GENERATION_TOKENS}-token output cap — "
+            "the output would be truncated. Split the spec, or raise "
+            "MAX_GENERATION_TOKENS in aitk/config.py."
+        )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        newline = raw.find("\n")
-        raw = raw[newline + 1:] if newline != -1 else raw[3:]
-    if raw.endswith("```"):
-        raw = raw[: raw.rfind("```")].rstrip()
+    code = _strip_fences(message.content[0].text)
+    return code, {
+        "input_tokens": message.usage.input_tokens,
+        "output_tokens": message.usage.output_tokens,
+    }
 
-    Path(output_path).write_text(raw)
-    input_tokens  = message.usage.input_tokens
-    output_tokens = message.usage.output_tokens
-    if verbose:
-        print(f"      {output_tokens} tokens out  {input_tokens}in/{output_tokens}out", file=sys.stderr)
 
-    if verbose:
-        print("[2/2] Running tests...", file=sys.stderr)
-    passed, test_out = _run_tests(test_dir)
-    pass_count = test_out.count(" PASSED")
-    fail_count = test_out.count(" FAILED")
-    if verbose:
-        print(f"      {pass_count} passed  {fail_count} failed", file=sys.stderr)
+async def _generate_with_review(
+    generate_fn,
+    spec_body: str,
+    full_spec: str,
+    frameworks: list[str],
+    output_path: str,
+    test_dir: str,
+    verbose: bool,
+) -> tuple[list[dict], list[dict]]:
+    """Shared generate → test → review loop with one retry on blocking errors.
 
+    generate_fn(prompt) -> (code, gen_stats) where gen_stats carries
+    claude_input_tokens / claude_output_tokens / ollama_response_tokens
+    (zeroes for whichever backend didn't run) plus backend-specific extras.
+    """
+    versions = _installed_versions(frameworks)
+    iterations: list[dict] = []
+    prompt = _coder_prompt(spec_body)
+
+    for attempt in (1, 2):
+        if verbose:
+            print(f"[{attempt}] Generating...", file=sys.stderr)
+        code, gen_stats = await generate_fn(prompt)
+        Path(output_path).write_text(code)
+
+        if verbose:
+            print(f"[{attempt}] Running tests...", file=sys.stderr)
+        _, test_out = _run_tests(test_dir)
+        pass_count = test_out.count(" PASSED")
+        fail_count = test_out.count(" FAILED")
+        if verbose:
+            print(f"      {pass_count} passed  {fail_count} failed", file=sys.stderr)
+
+        if verbose:
+            print(f"[{attempt}] Claude review ({REVIEW_MODEL})...", file=sys.stderr)
+        review = claude_review(full_spec, code, _condense_for_review(test_out), versions)
+        usage = review.pop("_usage")
+        if verbose:
+            print(
+                f"      passed={review.get('passed')}  issues={len(review.get('issues', []))}  "
+                f"tokens={usage['input_tokens']}in/{usage['output_tokens']}out",
+                file=sys.stderr,
+            )
+
+        iterations.append({
+            "iteration": attempt,
+            "gen_stats": gen_stats,
+            "pass_count": pass_count,
+            "fail_count": fail_count,
+            "review": review,
+            "claude_tokens": usage,
+        })
+
+        blocking = [i for i in review.get("issues", []) if i.get("severity") == "error"]
+        if not blocking or attempt == 2:
+            break
+        if verbose:
+            print(f"\n[retry] {len(blocking)} blocking issue(s). Regenerating...", file=sys.stderr)
+        prompt = _retry_prompt(spec_body, code, blocking)
+
+    return iterations
+
+
+def _summarize(route: str, iterations: list[dict]) -> dict:
+    """Fold per-iteration stats into the flat result dict callers and CI expect."""
+    final = iterations[-1]
+    gen_in = sum(it["gen_stats"]["claude_input_tokens"] for it in iterations)
+    gen_out = sum(it["gen_stats"]["claude_output_tokens"] for it in iterations)
+    review_in = sum(it["claude_tokens"]["input_tokens"] for it in iterations)
+    review_out = sum(it["claude_tokens"]["output_tokens"] for it in iterations)
+    ollama_out = sum(it["gen_stats"]["ollama_response_tokens"] for it in iterations)
+
+    cost = claude_cost(GENERATION_MODEL, gen_in, gen_out) + claude_cost(
+        REVIEW_MODEL, review_in, review_out
+    )
     return {
-        "route": "claude",
-        "iterations": 1,
-        "final_pass_count": pass_count,
-        "final_fail_count": fail_count,
-        "claude_input_tokens": input_tokens,
-        "claude_output_tokens": output_tokens,
-        "ollama_response_tokens": 0,
-        "estimated_cost_usd": round(cost_raw_claude(input_tokens, output_tokens), 5),
+        "route": route,
+        "iterations": len(iterations),
+        "final_pass_count": final["pass_count"],
+        "final_fail_count": final["fail_count"],
+        "final_review": final["review"],
+        "claude_input_tokens": gen_in + review_in,
+        "claude_output_tokens": gen_out + review_out,
+        "ollama_response_tokens": ollama_out,
+        "estimated_cost_usd": round(cost, 5),
+        "all_iterations": iterations,
     }
 
 
@@ -251,30 +216,56 @@ async def run_generate(
     output_path: str,
     test_dir: str,
     route: str = "auto",
-    model: str = "qwen2.5-coder:14b",
+    model: str | None = None,
     verbose: bool = True,
 ) -> dict:
     """Top-level generate entry point — parses spec, routes, runs, logs."""
+    from aitk.config import OLLAMA_MODEL
+    model = model or OLLAMA_MODEL
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     meta, spec_body = parse_spec(spec_path)
     frameworks: list[str] = meta.get("frameworks") or []
     estimated_lines: int | None = meta.get("estimated_lines")
+    full_spec = Path(spec_path).read_text()
 
-    resolved_route = route
-    if route == "auto":
-        resolved_route = decide_route(spec_body, estimated_lines)
-        if verbose:
-            tokens = (estimated_lines or 0) * 12 if estimated_lines else len(spec_body.split()) * 2
-            print(f"[route] auto → {resolved_route}  (estimated {tokens} output tokens, break-even 1225)", file=sys.stderr)
+    resolved_route = resolve_route(route, spec_body, estimated_lines)
+    if route == "auto" and verbose:
+        if not ollama_enabled():
+            print("[route] auto → claude  (local models disabled — set AITK_OLLAMA_ENABLED=1 to route locally)", file=sys.stderr)
+        else:
+            tokens = estimate_output_tokens(spec_body, estimated_lines)
+            print(f"[route] auto → {resolved_route}  (estimated {tokens} output tokens, break-even {BREAK_EVEN_TOKENS})", file=sys.stderr)
 
     t_start = time.monotonic()
 
     if resolved_route == "ollama":
-        result = await _generate_ollama(spec_body, frameworks, model, output_path, test_dir, verbose)
+        async def generate_fn(prompt: str) -> tuple[str, dict]:
+            code, stats = await ollama_generate(user_prompt=prompt, frameworks=frameworks, model=model)
+            if verbose:
+                print(f"      {stats['response_tokens']} tokens  {stats['tokens_per_second']} tok/s  {stats['elapsed_s']}s", file=sys.stderr)
+            return code, {
+                "claude_input_tokens": 0,
+                "claude_output_tokens": 0,
+                "ollama_response_tokens": stats["response_tokens"],
+                "ollama_stats": stats,
+            }
     else:
-        result = await _generate_claude(spec_body, output_path, test_dir, verbose)
+        async def generate_fn(prompt: str) -> tuple[str, dict]:
+            code, usage = _claude_generate(prompt)
+            if verbose:
+                print(f"      {usage['input_tokens']}in/{usage['output_tokens']}out ({GENERATION_MODEL})", file=sys.stderr)
+            return code, {
+                "claude_input_tokens": usage["input_tokens"],
+                "claude_output_tokens": usage["output_tokens"],
+                "ollama_response_tokens": 0,
+            }
 
+    iterations = await _generate_with_review(
+        generate_fn, spec_body, full_spec, frameworks, output_path, test_dir, verbose
+    )
+    result = _summarize(resolved_route, iterations)
     result["total_elapsed_s"] = round(time.monotonic() - t_start, 2)
     result["spec"] = spec_path
 

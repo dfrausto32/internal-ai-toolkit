@@ -2,10 +2,9 @@
 import json
 from pathlib import Path
 
-RUN_LOG = Path.home() / ".local" / "share" / "aitk" / "run_log.json"
+from aitk.config import GENERATION_MODEL, claude_cost
 
-_INPUT_RATE  = 3.00  / 1_000_000
-_OUTPUT_RATE = 15.00 / 1_000_000
+RUN_LOG = Path.home() / ".local" / "share" / "aitk" / "run_log.json"
 
 
 def log_run(entry: dict) -> None:
@@ -45,7 +44,11 @@ def show_cost(last_n: int = 5) -> None:
         ol_tok = r.get("ollama_response_tokens", 0)
         cl_in  = r.get("claude_input_tokens", 0)
         cl_out = r.get("claude_output_tokens", 0)
-        cost   = cl_in * _INPUT_RATE + cl_out * _OUTPUT_RATE
+        # Prefer the cost recorded at run time — recomputing from current rates
+        # would silently re-price history whenever rates or models change.
+        cost = r.get("estimated_cost_usd")
+        if cost is None:
+            cost = claude_cost(GENERATION_MODEL, cl_in, cl_out)
         total_cost += cost
         print(f"{ts:<22} {spec:<30} {route:<8} {ol_tok:>10} {cl_in:>10} {cl_out:>10} ${cost:>7.4f}")
 

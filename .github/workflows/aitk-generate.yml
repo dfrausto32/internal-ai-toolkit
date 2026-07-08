@@ -31,7 +31,7 @@ on:
         required: true
         type: string
       route:
-        description: "Generation route: auto, ollama, or claude (default: auto)"
+        description: "Generation route: auto, ollama, or claude. auto resolves to claude in CI (AITK_OLLAMA_ENABLED is unset on hosted runners)."
         required: false
         type: string
         default: "auto"
@@ -102,6 +102,9 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install pytest
 
+      # Explicit ollama route only. Note: a 14B model on a hosted runner is
+      # CPU-only and slow (~9 GB pull + minutes/kilotoken inference) — this
+      # path is realistic only on a self-hosted runner with a GPU.
       - name: Start Ollama (only for ollama route)
         if: inputs.route == 'ollama'
         run: |
@@ -115,6 +118,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          # Don't abort on a failing generate — outputs and the review-notes
+          # artifact must still be written so failures are debuggable.
+          set +e
           aitk generate \
             --spec "${{ inputs.spec }}" \
             --out  "${{ inputs.output }}" \
@@ -122,12 +128,17 @@ jobs:
             --route "${{ inputs.route }}" \
             --model "${{ inputs.model }}" \
             --json > result.json
-          echo "pass_count=$(jq '.final_pass_count' result.json)" >> $GITHUB_OUTPUT
-          echo "fail_count=$(jq '.final_fail_count' result.json)" >> $GITHUB_OUTPUT
-          echo "route_used=$(jq -r '.route' result.json)"         >> $GITHUB_OUTPUT
-          echo "cost_usd=$(jq '.estimated_cost_usd' result.json)" >> $GITHUB_OUTPUT
+          AITK_EXIT=$?
+          set -e
+          [ -s result.json ] || echo '{}' > result.json
+          echo "pass_count=$(jq '.final_pass_count // 0' result.json)"      >> $GITHUB_OUTPUT
+          echo "fail_count=$(jq '.final_fail_count // 0' result.json)"      >> $GITHUB_OUTPUT
+          echo "route_used=$(jq -r '.route // "unknown"' result.json)"      >> $GITHUB_OUTPUT
+          echo "cost_usd=$(jq '.estimated_cost_usd // 0' result.json)"      >> $GITHUB_OUTPUT
+          exit $AITK_EXIT
 
       - name: Upload generated file as artifact
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: generated-${{ github.run_id }}
