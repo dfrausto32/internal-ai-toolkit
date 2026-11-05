@@ -1,9 +1,21 @@
 # Ollama + Claude Code Setup Guide
 ## Local AI Workers, Claude as Orchestrator
 
+> **This is optional.** The default `aitk` pipeline is Claude-only and needs no local models. Follow this guide only if you want the local-generation route (`AITK_OLLAMA_ENABLED=1`).
+
+## Pick your platform
+
+| Platform | What to do |
+|----------|-----------|
+| Linux | Skip to [Step 2: Install Ollama](#step-2-install-ollama); install the NVIDIA (or ROCm) driver per your distro. |
+| macOS | Install Ollama from <https://ollama.com/download>; Apple Silicon uses unified memory, no GPU setup needed. Then jump to the model-pull step. |
+| Windows | Either install native Ollama for Windows, or follow the WSL2 path below (what this project's original benchmarks used). |
+
+The rest of this guide walks through the **Windows + WSL2 + NVIDIA** path in detail.
+
 ---
 
-## Before You Start: WSL2 Check
+## Before You Start: WSL2 Check (Windows only)
 
 Run these inside your Ubuntu WSL2 terminal to know exactly what you're working with before pulling any models.
 

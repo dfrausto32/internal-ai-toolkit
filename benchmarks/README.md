@@ -6,6 +6,16 @@ The test suites in each `tests/` directory are written by hand — they are the 
 
 ---
 
+## Current status
+
+> **The default pipeline has not been benchmarked.** All recorded results below are from the
+> Phase 1 (subagents) and Phase 3 (Ollama + Claude review) pipelines. The default is now Claude
+> Sonnet generation + Haiku review. Re-running these apps against it, with multiple runs for
+> variance and a larger multi-file benchmark, is the next roadmap item — see
+> [docs/roadmap.md](../docs/roadmap.md#next-up--benchmark-the-claude-only-default).
+
+---
+
 ## Apps
 
 | App | Description | Primary Skill Tested |

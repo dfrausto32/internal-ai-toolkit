@@ -1,5 +1,8 @@
 # internal-ai-toolkit
 
+[![CI](https://github.com/dfrausto32/internal-ai-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/dfrausto32/internal-ai-toolkit/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 A cost-optimized AI development pipeline. Claude Sonnet generates code from a spec, Claude Haiku reviews it against the spec and test results, and the pipeline retries once on blocking errors. When local-model hardware is available (`AITK_OLLAMA_ENABLED=1`), Ollama takes over generation for large jobs — free, fast, private — with the same Claude review layer on top. The `aitk` CLI wires it all together, including drafting the spec itself.
 
 ---
@@ -137,7 +140,8 @@ The Haiku review catches: wrong imports, schema drift, missing guards, falsy int
 | [docs/install.md](docs/install.md) | Full install options, prerequisites, environment variables |
 | [docs/spec-format.md](docs/spec-format.md) | Spec frontmatter schema, framework rules, routing behaviour |
 | [docs/github-actions.md](docs/github-actions.md) | Reusable workflow reference, inputs, outputs, CI routing advice |
-| [docs/ollama-setup.md](docs/ollama-setup.md) | Ollama install on WSL2 + NVIDIA GPU passthrough |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit: pipeline, routing, review loop, cost model, Phase 5 status |
+| [docs/ollama-setup.md](docs/ollama-setup.md) | Optional local models: Ollama on Linux, macOS, or Windows (WSL2) |
 | [docs/roadmap.md](docs/roadmap.md) | Phase history and what's next |
 | [docs/design-parallel-orchestration.md](docs/design-parallel-orchestration.md) | Phase 5 design — parallel orchestration architecture ([visual site](docs/design.html)) |
 | [benchmarks/README.md](benchmarks/README.md) | Benchmark methodology, scoring rubric, Phase 1–3 results |
@@ -157,6 +161,7 @@ internal-ai-toolkit/
 │   ├── agents.py                ← async Ollama worker, dynamic system prompt
 │   ├── review.py                ← Claude review step
 │   ├── generate.py              ← full generation + retry loop
+│   ├── plan.py                  ← Phase 5.1 node-spec schema + plan validation (not yet wired into the CLI)
 │   └── cost.py                  ← run cost log and display
 ├── pyproject.toml               ← package config, aitk entry point
 ├── .github/workflows/
@@ -172,14 +177,14 @@ internal-ai-toolkit/
 │   ├── app_01_rest_api/
 │   ├── app_02_data_pipeline/
 │   └── app_03_cli_tool/
-└── docs/
+└── docs/                        ← architecture, roadmap, design, setup guides
 ```
 
 ---
 
 ## Hardware reference (optional — local models only)
 
-No special hardware is needed for the default Claude-only pipeline. The local Ollama route requires a GPU with enough VRAM for the models below (originally developed against an RTX 4080, 16 GB VRAM); enable it with `AITK_OLLAMA_ENABLED=1`. See [docs/ollama-setup.md](docs/ollama-setup.md).
+No special hardware is needed for the default Claude-only pipeline. The local Ollama route requires a GPU with enough VRAM for the models below (developed against a single 16 GB-VRAM consumer GPU); enable it with `AITK_OLLAMA_ENABLED=1`. See [docs/ollama-setup.md](docs/ollama-setup.md).
 
 ```bash
 ollama pull qwen2.5-coder:14b   # code generation (~9 GB VRAM)
@@ -190,6 +195,8 @@ ollama pull llama3.2:3b          # notifications (~2 GB VRAM)
 ---
 
 ## Benchmark results (Phase 1–3)
+
+> **Caveat:** these numbers were measured on the original local-model (Ollama) pipeline. The default pipeline is now Claude-only and has **not yet been benchmarked** — that run is the next roadmap item, tracked in [docs/roadmap.md](docs/roadmap.md#next-up--benchmark-the-claude-only-default).
 
 | App | Phase 1 | Phase 3 (aitk) |
 |-----|---------|----------------|
@@ -204,4 +211,4 @@ Full results and methodology → [benchmarks/README.md](benchmarks/README.md)
 
 ## License
 
-Private repository — not for distribution.
+[MIT](LICENSE)

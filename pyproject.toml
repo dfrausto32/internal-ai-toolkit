@@ -8,8 +8,10 @@ packages = ["src/aitk"]
 [project]
 name = "aitk"
 version = "0.1.0"
-description = "Ollama + Claude orchestration for cost-optimized code generation"
+description = "Cost-optimized spec-to-code pipeline: Claude generation, Haiku review, optional local Ollama models"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "anthropic>=0.40.0",
     "httpx>=0.27.0",

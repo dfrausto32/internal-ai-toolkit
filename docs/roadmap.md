@@ -13,17 +13,17 @@ This document tracks what's been done, what's in progress, and what comes next. 
 | 2 — Benchmarks | ✅ Complete | Three test apps, scoring rubric, Phase 1 and Phase 3 results |
 | 3 — Orchestrator | ✅ Complete | Python orchestrator, Claude review loop, routing analysis |
 | 4 — Cross-Repo Integration | ✅ Complete | Installable CLI, spec convention, GitHub Actions reusable workflow |
-| 5 — Parallel Orchestration | 📐 Design | Many planners, one scheduler; worker→tester→reviewer DAG under a shared API budget |
+| Next — Benchmark the Claude-only default | ⬜ Not started | Re-run the three benchmarks on the current default pipeline |
+| 5 — Parallel Orchestration | 🔨 Early (5.1 done) | Many planners, one scheduler; worker→tester→reviewer DAG under a shared API budget |
 
 ---
 
 ## Phase 0 — Infrastructure ✅
 
-**Goal:** Ollama running with GPU acceleration on WSL2, models verified.
+**Goal:** Ollama running with GPU acceleration, models verified. Local models are now optional — see the Claude-only default in the README.
 
-- [x] WSL2 confirmed at version 2
-- [x] 32 GB RAM allocated to WSL2 via `.wslconfig`
-- [x] NVIDIA RTX 4080 GPU passthrough working (CUDA 13.1, driver 591.86)
+- [x] Linux environment confirmed (WSL2 on the original dev machine) with enough RAM allocated
+- [x] Consumer NVIDIA GPU (16 GB VRAM) passthrough working
 - [x] Ollama installed via one-line installer
 - [x] Models pulled: `qwen2.5-coder:14b`, `llama3.1:8b`, `llama3.2:3b`
 - [x] API verified at `http://localhost:11434`
@@ -177,13 +177,36 @@ A second repo (not this one) can run `aitk generate --spec SPEC.md --out module.
 
 ---
 
-## Phase 5 — Parallel Orchestration 📐
+## Next Up — Benchmark the Claude-only default
+
+**Why:** The headline results above (17/27 → 22/27) were measured on the original Ollama +
+Claude-review pipeline. The default is now Claude Sonnet generation + Haiku review, and it has
+never been scored. Every claim about the current pipeline is unmeasured until this is done, and
+Phase 5 should not be built further without a baseline to beat.
+
+- [ ] Run all three benchmarks on `--route claude` (the current default), 3 runs each to expose variance
+- [ ] Record pass counts, retries used, and real cost per run in `benchmarks/README.md`
+- [ ] Run the same specs on `--route ollama` where local models are available, for a like-for-like comparison
+- [ ] Re-derive the routing break-even with Haiku review pricing (the current constant predates it)
+- [ ] Add a larger fourth benchmark (multi-file, ~300+ lines) — the existing three are small and
+      cannot show whether Phase 5's multi-node approach beats a single big spec
+- [ ] Publish a one-table summary at the top of the README
+
+**Definition of done:** a dated results table for the default pipeline, with cost and variance,
+committed to `benchmarks/README.md` and linked from the README.
+
+---
+
+## Phase 5 — Parallel Orchestration 🔨
 
 **Goal:** Promote the serial single-file generate loop into a hierarchy — multiple planning
 orchestrators dispatching worker→tester→reviewer pipelines, coordinated by **one** scheduler
 under a single shared API rate-limit and cost budget.
 
-**Status:** Design agreed; not yet implemented.
+**Status:** Design agreed. Step 5.1 (node-spec schema, `src/aitk/plan.py`) is implemented and
+tested; nothing else is wired in yet. Steps 5.4 (broker) and 5.5 (scheduler) are **deliberately
+deferred** until the benchmark baseline above shows the single-node pipeline is the limiting
+factor — see the scope gate in [build-plan.md](build-plan.md#scope-gate-what-gets-built-and-when).
 
 **Full design → [design-parallel-orchestration.md](design-parallel-orchestration.md)**
 (visual version: [design.html](design.html))
