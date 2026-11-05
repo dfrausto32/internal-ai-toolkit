@@ -185,6 +185,9 @@ never been scored. Every claim about the current pipeline is unmeasured until th
 Phase 5 should not be built further without a baseline to beat.
 
 - [ ] Run all three benchmarks on `--route claude` (the current default), 3 runs each to expose variance
+- [ ] First live-API run of the reworked pipeline (Sonnet 5.5 / Haiku 5.5, spec-derived tests, patch retries): it is unit-tested with stubbed calls only
+- [ ] Ablations to justify each pipeline feature: test-failure retry, free checks, patch vs rewrite retry, caching on/off, 2 vs 3 attempts, effort levels
+- [ ] Compare hand-written vs spec-generated tests on the same specs (how often do generated tests disagree with ground truth?)
 - [ ] Record pass counts, retries used, and real cost per run in `benchmarks/README.md`
 - [ ] Run the same specs on `--route ollama` where local models are available, for a like-for-like comparison
 - [ ] Re-derive the routing break-even with Haiku review pricing (the current constant predates it)

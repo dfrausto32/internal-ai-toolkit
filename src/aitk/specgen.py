@@ -4,12 +4,9 @@ The planning layer in front of `aitk generate`: turn a rough idea into a
 complete, routable spec — frontmatter the router can consume plus a body
 precise enough for one-pass code generation.
 """
-import os
-
-import anthropic
-
 from aitk.agents import _strip_fences
-from aitk.config import GENERATION_MODEL, claude_cost
+from aitk.config import GENERATION_EFFORT, GENERATION_MODEL, claude_cost
+from aitk.llm import call_claude
 from aitk.spec import parse_spec_text
 
 _SYSTEM = (
@@ -81,26 +78,21 @@ def draft_spec(description: str, max_attempts: int = 2) -> tuple[str, list[str],
 
     Returns (spec_text, remaining_problems, usage_dict).
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise EnvironmentError("ANTHROPIC_API_KEY is not set")
-    client = anthropic.Anthropic(api_key=api_key)
-
     total_in = total_out = 0
+    cost = 0.0
     prompt = _TEMPLATE.format(description=description)
     text, problems = "", ["no draft produced"]
 
     for _ in range(max_attempts):
-        message = client.messages.create(
-            model=GENERATION_MODEL,
-            max_tokens=4096,
-            system=_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
+        raw, usage = call_claude(
+            GENERATION_MODEL, prompt, system=_SYSTEM, max_tokens=8000,
+            effort=GENERATION_EFFORT, cache=False,
         )
-        total_in += message.usage.input_tokens
-        total_out += message.usage.output_tokens
+        total_in += usage["input_tokens"]
+        total_out += usage["output_tokens"]
+        cost += claude_cost(GENERATION_MODEL, usage["input_tokens"], usage["output_tokens"])
 
-        text = _strip_fences(message.content[0].text)
+        text = _strip_fences(raw)
         problems = spec_problems(text)
         if not problems:
             break
@@ -111,6 +103,6 @@ def draft_spec(description: str, max_attempts: int = 2) -> tuple[str, list[str],
     usage = {
         "input_tokens": total_in,
         "output_tokens": total_out,
-        "cost_usd": round(claude_cost(GENERATION_MODEL, total_in, total_out), 5),
+        "cost_usd": round(cost, 5),
     }
     return text, problems, usage

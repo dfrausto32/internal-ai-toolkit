@@ -7,6 +7,17 @@ A cost-optimized AI development pipeline. Claude Sonnet generates code from a sp
 
 ---
 
+## Why this project exists
+
+AI code generation has a cost problem and a trust problem: the best models are expensive to run for every line, and unreviewed output can't be trusted. `aitk` is a working experiment in answering both with measurement instead of opinion:
+
+- **Cost:** where is the break-even between a cheap/free generator plus a paid reviewer, versus paying a frontier model to write everything? (Phase 3 found it at roughly 100 lines of output, and the answer shifted again once local hardware stopped being available.)
+- **Trust:** what does it take to accept generated code? Here: deterministic checks first, then tests (hand-written, or written independently from the spec), then a cheap model review, with a bounded retry.
+
+The repo keeps the receipts: benchmark apps with hand-written ground-truth tests, a cost log for every run, and a roadmap that records what changed and why. Where something is unmeasured (the current default pipeline's benchmark scores, for one), the docs say so.
+
+---
+
 ## Using aitk in another repo
 
 ### 1. Install
@@ -66,12 +77,16 @@ aitk generate --spec SPEC.md --out src/module.py --tests tests/
 ```
 
 `aitk` will:
-1. Route the job (Claude by default; Ollama for large specs when `AITK_OLLAMA_ENABLED=1`)
-2. Generate the code (Claude Sonnet, or local Ollama)
-3. Run your test suite
-4. Send the code + test output to Claude Haiku for review
-5. Retry once if the review flags blocking errors
-6. Log the run cost
+1. **Write tests from the spec** if `tests/` has none (`--gen-tests auto`). A separate agent does this from the spec alone. It never sees the implementation, so the code's author can't bias the tests. Generated tests are labelled as such; review them.
+2. Route the job (Claude by default; Ollama for large specs when `AITK_OLLAMA_ENABLED=1`)
+3. Generate the code (Claude Sonnet, or local Ollama)
+4. Run free checks (syntax, undefined names via ruff). A failure retries immediately with no model review
+5. Run the test suite. Failing tests retry immediately on the failure output, again with no review spent
+6. Once tests pass, send the code + test output to Claude Haiku for review
+7. Retry on blocking review errors. Retries ask for a minimal patch (SEARCH/REPLACE edits) and fall back to a full rewrite if it doesn't apply
+8. Log the run cost, including prompt-cache usage
+
+Total attempts default to 2; change with `--max-attempts N` or `AITK_MAX_ATTEMPTS`. `--gen-tests never` skips test writing; `--gen-tests always` adds a generated suite next to existing tests.
 
 ### 6. Check cost history
 
@@ -122,11 +137,13 @@ aitk generate ◄─────────┘ (after human review)
     │
     ├─ route=ollama ─► qwen2.5-coder:14b (local, free; needs AITK_OLLAMA_ENABLED=1)
     │                       │
-    └─ route=claude ─► Claude Sonnet 4.6 (direct generation)
+    └─ route=claude ─► Claude Sonnet 5.5 (direct generation)
                             │
-                       pytest tests/
+                  static checks ─► pytest tests/ ──► (fail? retry on the output, no review)
                             │
-                       Haiku review ──► blocking errors? ──► retry once
+                       Haiku review ──► blocking errors? ──► retry (patch, else rewrite)
+
+ no tests yet? ─► independent test-writer (spec only) runs first
 ```
 
 The Haiku review catches: wrong imports, schema drift, missing guards, falsy integer checks, missing docstrings.
@@ -161,6 +178,10 @@ internal-ai-toolkit/
 │   ├── agents.py                ← async Ollama worker, dynamic system prompt
 │   ├── review.py                ← Claude review step
 │   ├── generate.py              ← full generation + retry loop
+│   ├── testgen.py               ← independent spec-only test writer
+│   ├── checks.py                ← free static checks before paid review
+│   ├── patching.py              ← SEARCH/REPLACE minimal-patch retries
+│   ├── llm.py                   ← shared Claude client (caching, usage, stop reasons)
 │   ├── plan.py                  ← Phase 5.1 node-spec schema + plan validation (not yet wired into the CLI)
 │   └── cost.py                  ← run cost log and display
 ├── pyproject.toml               ← package config, aitk entry point
