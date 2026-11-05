@@ -23,6 +23,11 @@ benchmarks/*/test_tasks.db
 .pytest_cache/
 *.pytest_cache
 
+# Maintainer-specific / machine-local context (never commit)
+CLAUDE.local.md
+.claude/settings.local.json
+.local/
+
 # OS
 .DS_Store
 Thumbs.db

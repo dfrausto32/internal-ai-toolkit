@@ -1,6 +1,20 @@
 # internal-ai-toolkit
 
+[![CI](https://github.com/dfrausto32/internal-ai-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/dfrausto32/internal-ai-toolkit/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 A cost-optimized AI development pipeline. Claude Sonnet generates code from a spec, Claude Haiku reviews it against the spec and test results, and the pipeline retries once on blocking errors. When local-model hardware is available (`AITK_OLLAMA_ENABLED=1`), Ollama takes over generation for large jobs — free, fast, private — with the same Claude review layer on top. The `aitk` CLI wires it all together, including drafting the spec itself.
+
+---
+
+## Why this project exists
+
+AI code generation has a cost problem and a trust problem: the best models are expensive to run for every line, and unreviewed output can't be trusted. `aitk` is a working experiment in answering both with measurement instead of opinion:
+
+- **Cost:** where is the break-even between a cheap/free generator plus a paid reviewer, versus paying a frontier model to write everything? (Phase 3 found it at roughly 100 lines of output, and the answer shifted again once local hardware stopped being available.)
+- **Trust:** what does it take to accept generated code? Here: deterministic checks first, then tests (hand-written, or written independently from the spec), then a cheap model review, with a bounded retry.
+
+The repo keeps the receipts: benchmark apps with hand-written ground-truth tests, a cost log for every run, and a roadmap that records what changed and why. Where something is unmeasured (the current default pipeline's benchmark scores, for one), the docs say so.
 
 ---
 
@@ -63,12 +77,16 @@ aitk generate --spec SPEC.md --out src/module.py --tests tests/
 ```
 
 `aitk` will:
-1. Route the job (Claude by default; Ollama for large specs when `AITK_OLLAMA_ENABLED=1`)
-2. Generate the code (Claude Sonnet, or local Ollama)
-3. Run your test suite
-4. Send the code + test output to Claude Haiku for review
-5. Retry once if the review flags blocking errors
-6. Log the run cost
+1. **Write tests from the spec** if `tests/` has none (`--gen-tests auto`). A separate agent does this from the spec alone. It never sees the implementation, so the code's author can't bias the tests. Generated tests are labelled as such; review them.
+2. Route the job (Claude by default; Ollama for large specs when `AITK_OLLAMA_ENABLED=1`)
+3. Generate the code (Claude Sonnet, or local Ollama)
+4. Run free checks (syntax, undefined names via ruff). A failure retries immediately with no model review
+5. Run the test suite. Failing tests retry immediately on the failure output, again with no review spent
+6. Once tests pass, send the code + test output to Claude Haiku for review
+7. Retry on blocking review errors. Retries ask for a minimal patch (SEARCH/REPLACE edits) and fall back to a full rewrite if it doesn't apply
+8. Log the run cost, including prompt-cache usage
+
+Total attempts default to 2; change with `--max-attempts N` or `AITK_MAX_ATTEMPTS`. `--gen-tests never` skips test writing; `--gen-tests always` adds a generated suite next to existing tests.
 
 ### 6. Check cost history
 
@@ -119,11 +137,13 @@ aitk generate ◄─────────┘ (after human review)
     │
     ├─ route=ollama ─► qwen2.5-coder:14b (local, free; needs AITK_OLLAMA_ENABLED=1)
     │                       │
-    └─ route=claude ─► Claude Sonnet 4.6 (direct generation)
+    └─ route=claude ─► Claude Sonnet 5.5 (direct generation)
                             │
-                       pytest tests/
+                  static checks ─► pytest tests/ ──► (fail? retry on the output, no review)
                             │
-                       Haiku review ──► blocking errors? ──► retry once
+                       Haiku review ──► blocking errors? ──► retry (patch, else rewrite)
+
+ no tests yet? ─► independent test-writer (spec only) runs first
 ```
 
 The Haiku review catches: wrong imports, schema drift, missing guards, falsy integer checks, missing docstrings.
@@ -137,7 +157,8 @@ The Haiku review catches: wrong imports, schema drift, missing guards, falsy int
 | [docs/install.md](docs/install.md) | Full install options, prerequisites, environment variables |
 | [docs/spec-format.md](docs/spec-format.md) | Spec frontmatter schema, framework rules, routing behaviour |
 | [docs/github-actions.md](docs/github-actions.md) | Reusable workflow reference, inputs, outputs, CI routing advice |
-| [docs/ollama-setup.md](docs/ollama-setup.md) | Ollama install on WSL2 + NVIDIA GPU passthrough |
+| [docs/architecture.md](docs/architecture.md) | How the pieces fit: pipeline, routing, review loop, cost model, Phase 5 status |
+| [docs/ollama-setup.md](docs/ollama-setup.md) | Optional local models: Ollama on Linux, macOS, or Windows (WSL2) |
 | [docs/roadmap.md](docs/roadmap.md) | Phase history and what's next |
 | [docs/design-parallel-orchestration.md](docs/design-parallel-orchestration.md) | Phase 5 design — parallel orchestration architecture ([visual site](docs/design.html)) |
 | [benchmarks/README.md](benchmarks/README.md) | Benchmark methodology, scoring rubric, Phase 1–3 results |
@@ -157,6 +178,11 @@ internal-ai-toolkit/
 │   ├── agents.py                ← async Ollama worker, dynamic system prompt
 │   ├── review.py                ← Claude review step
 │   ├── generate.py              ← full generation + retry loop
+│   ├── testgen.py               ← independent spec-only test writer
+│   ├── checks.py                ← free static checks before paid review
+│   ├── patching.py              ← SEARCH/REPLACE minimal-patch retries
+│   ├── llm.py                   ← shared Claude client (caching, usage, stop reasons)
+│   ├── plan.py                  ← Phase 5.1 node-spec schema + plan validation (not yet wired into the CLI)
 │   └── cost.py                  ← run cost log and display
 ├── pyproject.toml               ← package config, aitk entry point
 ├── .github/workflows/
@@ -172,14 +198,14 @@ internal-ai-toolkit/
 │   ├── app_01_rest_api/
 │   ├── app_02_data_pipeline/
 │   └── app_03_cli_tool/
-└── docs/
+└── docs/                        ← architecture, roadmap, design, setup guides
 ```
 
 ---
 
 ## Hardware reference (optional — local models only)
 
-No special hardware is needed for the default Claude-only pipeline. The local Ollama route requires a GPU with enough VRAM for the models below (originally developed against an RTX 4080, 16 GB VRAM); enable it with `AITK_OLLAMA_ENABLED=1`. See [docs/ollama-setup.md](docs/ollama-setup.md).
+No special hardware is needed for the default Claude-only pipeline. The local Ollama route requires a GPU with enough VRAM for the models below (developed against a single 16 GB-VRAM consumer GPU); enable it with `AITK_OLLAMA_ENABLED=1`. See [docs/ollama-setup.md](docs/ollama-setup.md).
 
 ```bash
 ollama pull qwen2.5-coder:14b   # code generation (~9 GB VRAM)
@@ -190,6 +216,8 @@ ollama pull llama3.2:3b          # notifications (~2 GB VRAM)
 ---
 
 ## Benchmark results (Phase 1–3)
+
+> **Caveat:** these numbers were measured on the original local-model (Ollama) pipeline. The default pipeline is now Claude-only and has **not yet been benchmarked** — that run is the next roadmap item, tracked in [docs/roadmap.md](docs/roadmap.md#next-up--benchmark-the-claude-only-default).
 
 | App | Phase 1 | Phase 3 (aitk) |
 |-----|---------|----------------|
@@ -204,4 +232,4 @@ Full results and methodology → [benchmarks/README.md](benchmarks/README.md)
 
 ## License
 
-Private repository — not for distribution.
+[MIT](LICENSE)

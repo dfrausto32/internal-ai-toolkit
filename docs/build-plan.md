@@ -10,7 +10,7 @@ code under test) — the same ground-truth principle the benchmarks use.
 
 ---
 
-## Phase 5.1 — Node-spec schema (the contract) ⬅ in progress
+## Phase 5.1 — Node-spec schema (the contract) ✅ done
 
 Everything downstream reads or writes node specs, so the schema lands first.
 
@@ -89,13 +89,34 @@ hook** (default decided here, per the parked decision).
 
 ---
 
+## Scope gate: what gets built, and when
+
+The design below 5.3 is large relative to what exists. To avoid building infrastructure ahead of
+evidence, the plan is split into two tiers:
+
+**Tier 1 — build now (small, independently useful):** 5.1 schema ✅, 5.2 `plan`/`build` CLI,
+5.3 single-node executor. Together these give a human-approved, multi-file, sequential build that
+runs end to end. A sequential in-process runner over `topological_levels()` is enough to ship it.
+
+**Tier 2 — build only when justified:** 5.4 broker and 5.5 scheduler. Their trigger is *measured*,
+not assumed. Proceed only if the benchmark baseline (see the roadmap's "Next Up" section) shows at
+least one of:
+- real runs are wall-clock bound and independent nodes could run concurrently, or
+- Claude rate limits (429s) are actually hit, or
+- parallel runs collide on files in practice.
+
+Until then, a simple in-process dollar-budget counter and `asyncio.gather` over a level cover the
+need at a fraction of the complexity (no cross-process lease store, no heartbeat/TTL machinery).
+
+---
+
 ## Status
 
 | Phase | State |
 |-------|-------|
-| 5.1 Node-spec schema | 🔨 In progress |
+| 5.1 Node-spec schema | ✅ Done |
 | 5.2 plan/build CLI | ⬜ Not started |
 | 5.3 Node executor | ⬜ Not started |
-| 5.4 Broker | ⬜ Not started |
-| 5.5 Scheduler | ⬜ Not started |
+| 5.4 Broker | ⏸ Deferred (gated on benchmark data) |
+| 5.5 Scheduler | ⏸ Deferred (gated on benchmark data) |
 </content>

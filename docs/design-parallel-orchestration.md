@@ -1,6 +1,8 @@
 # Phase 5 — Parallel Orchestration Design
 
-**Status:** Design (not yet implemented)
+**Status:** Design — only the node-spec schema (5.1) exists in code. The broker and scheduler are
+**deferred until benchmark data justifies them** (see [build-plan.md](build-plan.md#scope-gate-what-gets-built-and-when)).
+Treat sections 3 onward as a proposal, not a commitment.
 **Visual version:** [design.html](design.html) — open in a browser for diagrams.
 
 This document captures the architecture for running multiple planning orchestrators
@@ -28,12 +30,12 @@ this hierarchy.
 ## 2. The bottleneck changed — design around the right one
 
 The original cost model (Phase 3) assumed local Ollama generation, where the scarce
-resource is the single RTX 4080 GPU. Phase 5's dominant path is **Claude API calls and
+resource is the single local GPU. Phase 5's dominant path is **Claude API calls and
 agents**, not Ollama. That flips the constraint:
 
 | Path | Bound by | Parallelizes? |
 |------|----------|---------------|
-| Ollama generation | GPU (one 4080, ~9 GB for `qwen2.5-coder:14b`) | No — serial on one card |
+| Ollama generation | GPU (one consumer GPU, ~9 GB for `qwen2.5-coder:14b`) | No — serial on one card |
 | Claude API (generate / review) | API rate limit + cost budget | Yes — async fan-out |
 
 **Consequence:** the limiter is now the **Claude rate limit (requests/min + tokens/min)

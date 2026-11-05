@@ -22,6 +22,8 @@ def _cmd_generate(args: argparse.Namespace) -> None:
             route=args.route,
             model=args.model,
             verbose=not args.quiet,
+            max_attempts=args.max_attempts,
+            gen_tests=args.gen_tests,
         )
     )
     if not args.quiet:
@@ -30,6 +32,10 @@ def _cmd_generate(args: argparse.Namespace) -> None:
               f"passed={result['final_pass_count']}  failed={result['final_fail_count']}  "
               f"cost=${result['estimated_cost_usd']:.4f}  elapsed={result['total_elapsed_s']}s",
               file=sys.stderr)
+        if result.get("tests_generated"):
+            print(f"note: tests were generated from the spec ({result['tests_generated']}). "
+                  "Review them — a pass is weaker evidence than with hand-written tests.",
+                  file=sys.stderr)
 
     if args.json:
         print(json.dumps(result, indent=2))
@@ -110,7 +116,20 @@ def main() -> None:
     gen = sub.add_parser("generate", help="Generate a module from a spec file")
     gen.add_argument("--spec",  required=True, help="Path to SPEC.md")
     gen.add_argument("--out",   required=True, help="Output file path for generated code")
-    gen.add_argument("--tests", required=True, help="Path to pytest test directory")
+    gen.add_argument("--tests", default="tests", help="Path to pytest test directory (default: tests)")
+    gen.add_argument(
+        "--gen-tests",
+        default="auto",
+        choices=["auto", "always", "never"],
+        help="Write tests from the spec with an independent agent: auto = only if the test "
+             "directory has none (default), always = add a generated suite alongside existing tests, never",
+    )
+    gen.add_argument(
+        "--max-attempts",
+        type=int,
+        default=None,
+        help="Total generate attempts including retries (default: 2, or AITK_MAX_ATTEMPTS)",
+    )
     gen.add_argument(
         "--route",
         default="auto",

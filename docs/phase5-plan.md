@@ -15,7 +15,7 @@ observability, not a rewrite** — we build on the Claude Agent SDK, the existin
 ## Decisions locked
 
 - **No Kimi.** The cloud model tier is **Claude only**. (Kimi K2.7-Code is a 1T-param
-  model needing 240 GB+ unified memory — it cannot run on the RTX 4080 anyway, and we are
+  model needing 240 GB+ unified memory — it cannot run on a single consumer GPU anyway, and we are
   not using it via cloud either.)
 - **Hybrid compute, tunable line.** Local `qwen2.5-coder:14b` (and other local models) by
   default; escalate to Claude when a configurable threshold says so. The threshold and the
@@ -75,7 +75,7 @@ agents via the Agent SDK, local agents via the existing `aitk`/Ollama path.
 - [ ] **2.3 Local backend** — wrap existing `aitk` generate / `ollama_generate` as the
       worker/tester backend so local agents reuse the proven loop.
 - [ ] **2.4 Spawn/stop orchestrator** — launch agents (parallel via asyncio), track them,
-      stop one or all; concurrency cap tied to hardware so the 4080 isn't overloaded.
+      stop one or all; concurrency cap tied to hardware so the local GPU isn't overloaded.
 - [ ] **2.5 Tests + headless CLI** — `aitk agent run --role worker --task ...`; integration
       test spawning 2 parallel local workers + 1 Claude agent.
 
@@ -121,7 +121,7 @@ The planner → workers → testers → merger pipeline as a loop-driven, dynami
 **DoD:** One command takes a multi-feature sprint goal and produces an integrated, tested,
 Claude-reviewed branch with no manual hand-holding between stages.
 
-**Worker task-sizing rule (the planner's core job).** `qwen2.5-coder:14b` on the 4080 is
+**Worker task-sizing rule (the planner's core job).** `qwen2.5-coder:14b` on a 16 GB GPU is
 reliable only when a task is: (1) a **single file**, **~100–200 lines** target; (2) a
 **frozen interface** — signatures + input/output schema fixed by the planner, no design left
 to the worker; (3) **stdlib or one declared framework**; (4) shipped with an **acceptance
@@ -131,7 +131,7 @@ choices. Two lines bound the worker tier: below ~100 lines, route to Claude dire
 The planner owns every cross-file seam (module boundaries, shared data model, the contracts
 between files) so each 14B worker fills one box against a fixed contract.
 
-**Local parallelism caveat.** A 14B model is 9 GB; the 4080 has ~14 GB free — so only **one
+**Local parallelism caveat.** A 14B model is 9 GB; a 16 GB card has ~14 GB free — so only **one
 14B worker runs at a time**. Local "parallel" workers are a queue through one GPU (the 3B/8B
 models can run alongside). Claude workers parallelize freely. Milestone 2's concurrency cap
 and Milestone 1's hardware profile encode this; both lift automatically on a hardware upgrade.

@@ -170,7 +170,7 @@ the loop above becomes a single leaf node</span></pre>
       <p class="lead">Phase 3 optimized for a scarce GPU. Phase 5's dominant path is Claude API calls, so the scarce resource is now global.</p>
       <table>
         <tr><th>Path</th><th>Bound by</th><th>Parallelizes?</th></tr>
-        <tr><td>Ollama generation</td><td>GPU — one RTX 4080, ~9&nbsp;GB for <code>qwen2.5-coder:14b</code></td><td><span class="c-review">No — serial on one card</span></td></tr>
+        <tr><td>Ollama generation</td><td>GPU — one consumer GPU, ~9&nbsp;GB for <code>qwen2.5-coder:14b</code></td><td><span class="c-review">No — serial on one card</span></td></tr>
         <tr><td>Claude API (generate / review)</td><td>API rate limit + cost budget</td><td><span class="c-work">Yes — async fan-out</span></td></tr>
       </table>
       <div class="call key">
@@ -290,7 +290,7 @@ repeat until DAG drained</pre>
         </div>
         <div class="leasecard">
           <h4 class="c-test">GPU lease</h4>
-          <div class="b">Bound = <b>1</b> for the 14b model — only relevant if an Ollama node exists. On one 4080, two coder jobs don't run faster in parallel; they thrash VRAM. Demoted to niche: Ollama is not the dominant Phase 5 path.</div>
+          <div class="b">Bound = <b>1</b> for the 14b model — only relevant if an Ollama node exists. On one consumer GPU, two coder jobs don't run faster in parallel; they thrash VRAM. Demoted to niche: Ollama is not the dominant Phase 5 path.</div>
         </div>
       </div>
     </section>

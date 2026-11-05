@@ -1,10 +1,8 @@
 """Claude review step — scores generated code against spec and test results."""
 import json
-import os
 
-import anthropic
-
-from aitk.config import REVIEW_MODEL
+from aitk.config import REVIEW_MODEL, REVIEW_THINKING
+from aitk.llm import call_claude
 
 _SYSTEM = (
     "You are a senior Python engineer reviewing AI-generated code against a spec. "
@@ -60,21 +58,17 @@ Output this exact JSON structure:
 
 def claude_review(spec: str, code: str, test_output: str, installed_versions: str) -> dict:
     """Call Claude to review generated code against the spec, test results, and real installed versions."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise EnvironmentError("ANTHROPIC_API_KEY is not set")
-
-    client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model=REVIEW_MODEL,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": _TEMPLATE.format(
+    raw, usage = call_claude(
+        REVIEW_MODEL,
+        _TEMPLATE.format(
             spec=spec, code=code, test_output=test_output, installed_versions=installed_versions
-        )}],
+        ),
+        system=_SYSTEM,
+        max_tokens=2048,
+        thinking=REVIEW_THINKING,
+        cache=False,  # every review prompt is unique (new code each time); caching only adds write cost
     )
-
-    raw = message.content[0].text.strip()
+    raw = raw.strip()
     if raw.startswith("```"):
         newline = raw.find("\n")
         raw = raw[newline + 1:] if newline != -1 else raw[3:]
@@ -92,8 +86,5 @@ def claude_review(spec: str, code: str, test_output: str, installed_versions: st
             "scores": {},
             "summary": f"Review skipped: model response was not valid JSON ({raw[:120]!r})",
         }
-    result["_usage"] = {
-        "input_tokens": message.usage.input_tokens,
-        "output_tokens": message.usage.output_tokens,
-    }
+    result["_usage"] = usage
     return result
