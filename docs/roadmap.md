@@ -184,6 +184,11 @@ Claude-review pipeline. The default is now Claude Sonnet generation + Haiku revi
 never been scored. Every claim about the current pipeline is unmeasured until this is done, and
 Phase 5 should not be built further without a baseline to beat.
 
+- [ ] **Plain-Claude baseline (run first):** the same specs through a single Sonnet 5.5 prompt with
+      no pipeline (no generated tests, no review, no retries), scored by the same hand-written
+      tests. Report pass rate and cost side by side with `aitk`. This answers "why not just use
+      Claude?" — if the baseline matches `aitk`, the pipeline's value has to come from somewhere
+      else (cost control, unattended runs) and the docs must say so
 - [ ] Run all three benchmarks on `--route claude` (the current default), 3 runs each to expose variance
 - [ ] First live-API run of the reworked pipeline (Sonnet 5.5 / Haiku 5.5, spec-derived tests, patch retries): it is unit-tested with stubbed calls only
 - [ ] Ablations to justify each pipeline feature: test-failure retry, free checks, patch vs rewrite retry, caching on/off, 2 vs 3 attempts, effort levels
@@ -194,6 +199,15 @@ Phase 5 should not be built further without a baseline to beat.
 - [ ] Add a larger fourth benchmark (multi-file, ~300+ lines) — the existing three are small and
       cannot show whether Phase 5's multi-node approach beats a single big spec
 - [ ] Publish a one-table summary at the top of the README
+
+### Proposed (not committed): codebase-aware generation
+
+Today `aitk` generates from a spec alone; it never reads existing code. That limits it to
+greenfield single modules. A "context" phase would read the target repo before generating
+(file tree, the modules the spec names, existing conventions, existing tests) and pass a
+bounded excerpt to the generator. Scope it only after the baseline above: Claude Code already
+does this interactively, so this is worth building only if unattended, spec-driven changes to
+existing code are something we actually want to support.
 
 **Definition of done:** a dated results table for the default pipeline, with cost and variance,
 committed to `benchmarks/README.md` and linked from the README.
